@@ -4,7 +4,8 @@ import { z } from "zod";
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(4000),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-  FRONTEND_URL: z.string().url(),
+  FRONTEND_URL: z.string().min(1, "FRONTEND_URL is required"),
+  FRONTEND_URLS: z.string().optional(),
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   REDIS_URL: z.string().min(1, "REDIS_URL is required"),
   JWT_SECRET: z.string().min(16, "JWT_SECRET must be at least 16 characters"),
@@ -40,8 +41,47 @@ if (!parsed.success) {
   throw new Error(`Environment validation failed:\n${issues.join("\n")}`);
 }
 
+function normalizeOrigin(value: string) {
+  try {
+    return new URL(value.trim()).origin;
+  } catch {
+    return null;
+  }
+}
+
+function withWwwVariant(origin: string) {
+  const url = new URL(origin);
+  const hostname = url.hostname;
+  const variants = [origin];
+
+  if (hostname.startsWith("www.")) {
+    url.hostname = hostname.slice(4);
+    variants.push(url.origin);
+  } else if (!hostname.includes("localhost") && hostname.includes(".")) {
+    url.hostname = `www.${hostname}`;
+    variants.push(url.origin);
+  }
+
+  return variants;
+}
+
+const configuredFrontendOrigins = [parsed.data.FRONTEND_URL, parsed.data.FRONTEND_URLS ?? ""]
+  .flatMap((value) => value.split(","))
+  .map(normalizeOrigin)
+  .filter((origin): origin is string => Boolean(origin));
+
+const frontendOrigins = Array.from(
+  new Set(configuredFrontendOrigins.flatMap((origin) => withWwwVariant(origin)))
+);
+
+if (frontendOrigins.length === 0) {
+  throw new Error("Environment validation failed:\nFRONTEND_URL: must contain a valid URL origin");
+}
+
 export const env = {
   ...parsed.data,
+  FRONTEND_URL: frontendOrigins[0]!,
+  FRONTEND_ORIGINS: frontendOrigins,
   FIREBASE_PRIVATE_KEY: parsed.data.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n")
 };
 

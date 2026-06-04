@@ -24,7 +24,7 @@ export function initSocketServer(server: HttpServer) {
 
   const socketServer = new Server(server, {
     cors: {
-      origin: env.FRONTEND_URL,
+      origin: env.FRONTEND_ORIGINS,
       credentials: true
     }
   });

@@ -70,7 +70,7 @@ export function EarningsCalculator() {
           <p className="text-sm font-semibold uppercase tracking-[0.18em] text-ink-muted">
             Earnings Calculator
           </p>
-          <h2 className="mt-4 max-w-lg [font-family:Inter,sans-serif] text-[1.75rem] font-semibold leading-none tracking-[-0.08em] text-ink md:text-6xl md:font-extrabold md:leading-tight md:tracking-[-0.05em]">
+          <h2 className="mt-4 max-w-lg [font-family:Inter,sans-serif] text-[1.75rem] font-semibold leading-none tracking-[-0.08em] text-ink md:text-[2.5rem] md:font-semibold md:leading-none md:tracking-[-0.08em]">
             From sign-up to your first hotspot in 60 seconds
           </h2>
           <p className="mt-4 max-w-md text-base leading-7 text-ink-muted">

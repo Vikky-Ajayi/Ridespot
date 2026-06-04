@@ -42,7 +42,7 @@ export default function LandingPage() {
             <p className="inline-flex w-fit self-start whitespace-nowrap rounded-[0.72rem] bg-[#f1f2f4] px-3 py-[0.45rem] text-[1.02rem] font-semibold leading-none tracking-[-0.02em] text-[#6c6c6c]">
               How it Works
             </p>
-            <h2 className="mt-4 max-w-[34rem] [font-family:Inter,sans-serif] text-[1.75rem] font-semibold leading-none tracking-[-0.08em] text-ink lg:text-[2.96rem] lg:font-extrabold lg:leading-[0.92] lg:tracking-[-0.06em]">
+            <h2 className="mt-4 max-w-[34rem] [font-family:Inter,sans-serif] text-[1.75rem] font-semibold leading-none tracking-[-0.08em] text-ink lg:text-[2.5rem] lg:font-semibold lg:leading-none lg:tracking-[-0.08em]">
               <span className="block lg:whitespace-nowrap">From sign-up to your first</span>
               <span className="block lg:whitespace-nowrap">hotspot in 60 seconds</span>
             </h2>
@@ -63,7 +63,7 @@ export default function LandingPage() {
             <p className="text-sm font-semibold uppercase tracking-[0.18em] text-ink-muted">
               Simple Pricing
             </p>
-            <h2 className="mt-4 [font-family:Inter,sans-serif] text-[1.75rem] font-semibold leading-none tracking-[-0.08em] text-ink md:text-[3.5rem] md:font-extrabold md:leading-[0.95] md:tracking-[-0.05em]">
+            <h2 className="mt-4 [font-family:Inter,sans-serif] text-[1.75rem] font-semibold leading-none tracking-[-0.08em] text-ink md:text-[2.5rem] md:font-semibold md:leading-none md:tracking-[-0.08em]">
               Start free. <span className="text-brand">Upgrade</span> when you&apos;re ready.
             </h2>
           </div>
@@ -81,7 +81,7 @@ export default function LandingPage() {
             <p className="text-sm font-semibold uppercase tracking-[0.18em] text-ink-muted">
               Faq
             </p>
-            <h2 className="mt-4 [font-family:Inter,sans-serif] text-[1.75rem] font-semibold leading-none tracking-[-0.08em] text-ink md:text-[3.5rem] md:font-extrabold md:leading-[0.95] md:tracking-[-0.05em]">
+            <h2 className="mt-4 [font-family:Inter,sans-serif] text-[1.75rem] font-semibold leading-none tracking-[-0.08em] text-ink md:text-[2.5rem] md:font-semibold md:leading-none md:tracking-[-0.08em]">
               Questions drivers ask
             </h2>
           </div>
@@ -107,7 +107,7 @@ export default function LandingPage() {
             <p className="text-sm font-semibold uppercase tracking-[0.18em] text-ink-muted">
               Driver Stories
             </p>
-            <h2 className="mt-4 [font-family:Inter,sans-serif] text-[1.75rem] font-semibold leading-none tracking-[-0.08em] text-ink md:text-[3.5rem] md:font-extrabold md:leading-[0.95] md:tracking-[-0.05em]">
+            <h2 className="mt-4 [font-family:Inter,sans-serif] text-[1.75rem] font-semibold leading-none tracking-[-0.08em] text-ink md:text-[2.5rem] md:font-semibold md:leading-none md:tracking-[-0.08em]">
               Real drivers. Real results.
             </h2>
           </div>

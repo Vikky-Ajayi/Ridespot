@@ -9,7 +9,7 @@ export function FeaturesGrid() {
           <p className="text-sm font-semibold uppercase tracking-[0.18em] text-white/48">
             Features
           </p>
-          <h2 className="mt-4 [font-family:Inter,sans-serif] text-[1.75rem] font-semibold leading-none tracking-[-0.08em] md:text-[4rem] md:font-extrabold md:leading-[0.95] md:tracking-[-0.05em]">
+          <h2 className="mt-4 [font-family:Inter,sans-serif] text-[1.75rem] font-semibold leading-none tracking-[-0.08em] md:text-[2.5rem] md:font-semibold md:leading-none md:tracking-[-0.08em]">
             Everything you need to drive smarter
           </h2>
           <p className="mt-4 max-w-xl text-base leading-7 text-white/62 md:text-lg">

@@ -4,7 +4,7 @@ export function CtaSection() {
   return (
     <section className="bg-brand py-16 text-center text-ink md:py-24">
       <div className="mx-auto max-w-4xl px-4 md:px-6 lg:px-[14px]">
-        <h2 className="[font-family:Inter,_system-ui,_sans-serif] text-[1.75rem] font-semibold leading-none tracking-[-0.08em] md:text-[2rem] md:leading-[1]">
+        <h2 className="[font-family:Inter,_system-ui,_sans-serif] text-[1.75rem] font-semibold leading-none tracking-[-0.08em] md:text-[2.5rem] md:font-semibold md:leading-none md:tracking-[-0.08em]">
           <span className="block md:inline">Ready to</span>{" "}
           <span className="block md:inline">
             earn <em className="italic text-[#004825]">more</em> with

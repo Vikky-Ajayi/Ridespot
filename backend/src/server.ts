@@ -11,7 +11,7 @@ async function start() {
   await verifyDatabaseConnection();
 
   await app.listen({
-    host: "0.0.0.0",
+    host: "::",
     port: env.PORT
   });
 

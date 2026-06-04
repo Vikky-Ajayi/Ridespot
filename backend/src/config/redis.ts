@@ -12,6 +12,7 @@ function buildRedisOptions(): RedisOptions {
     password: redisUrl.password || undefined,
     db: redisUrl.pathname ? Number(redisUrl.pathname.replace("/", "") || 0) : 0,
     tls: useTls ? {} : undefined,
+    family: 0,
     maxRetriesPerRequest: null,
     enableReadyCheck: false,
     lazyConnect: false

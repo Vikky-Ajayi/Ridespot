@@ -56,17 +56,31 @@ export async function withTransaction<T>(callback: (client: PoolClient) => Promi
 }
 
 export async function verifyDatabaseConnection() {
-  try {
-    await db.query("SELECT 1");
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+  const maxAttempts = 8;
 
-    if (message.includes("postgres.railway.internal")) {
-      console.error(
-        "DATABASE_URL points to a Railway private hostname. Use your Supabase public/pooler connection string for this Railway backend service."
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await db.query("SELECT 1");
+      return;
+    } catch (error) {
+      const err = error as { code?: string; hostname?: string; message?: string };
+      const isRetryable =
+        err.code === "ENOTFOUND" || err.code === "ECONNREFUSED" || err.code === "ETIMEDOUT";
+
+      if (!isRetryable || attempt === maxAttempts) {
+        if (err.hostname?.endsWith(".railway.internal")) {
+          console.error(
+            `Cannot reach ${err.hostname}. Railway private hostnames only resolve when the API, Postgres, and Redis services are in the same project and environment.`
+          );
+        }
+
+        throw error;
+      }
+
+      console.warn(
+        `Database connection attempt ${attempt}/${maxAttempts} failed (${err.code ?? "unknown"}). Retrying...`
       );
+      await new Promise((resolve) => setTimeout(resolve, 1500));
     }
-
-    throw error;
   }
 }

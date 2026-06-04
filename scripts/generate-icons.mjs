@@ -4,7 +4,7 @@ import sharp from "sharp";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
-const source = path.join(rootDir, "public", "assets", "logo-light.png");
+const source = path.join(rootDir, "public", "assets", "logo-light-4k.png");
 const outputDir = path.join(rootDir, "public", "icons");
 
 const targets = [

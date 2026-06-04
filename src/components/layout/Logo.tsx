@@ -18,9 +18,8 @@ export function Logo({
   priority = false
 }: LogoProps) {
   const resolvedVariant = variant ?? (light ? "light" : "dark");
-  const src = resolvedVariant === "light" ? "/assets/logo-light.png" : "/assets/logo-primary.png";
-  const dimensions =
-    resolvedVariant === "light" ? { width: 1429, height: 280 } : { width: 139, height: 32 };
+  const src = resolvedVariant === "light" ? "/assets/logo-light-4k.png" : "/assets/logo-dark-4k.png";
+  const dimensions = { width: 4096, height: 950 };
 
   return (
     <Link href={href} className={cn("inline-flex items-center", className)}>

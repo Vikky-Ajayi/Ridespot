@@ -4,7 +4,12 @@ import { env } from "./env.js";
 function isLocalDatabaseUrl(databaseUrl: string) {
   try {
     const { hostname } = new URL(databaseUrl);
-    return hostname === "localhost" || hostname === "127.0.0.1" || hostname.endsWith(".local");
+    return (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname.endsWith(".local") ||
+      hostname.endsWith(".railway.internal")
+    );
   } catch {
     return false;
   }

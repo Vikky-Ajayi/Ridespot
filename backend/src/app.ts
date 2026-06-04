@@ -20,8 +20,20 @@ export async function buildApp() {
   await registerRateLimit(app);
   await app.register(jwtPlugin);
 
-  app.setErrorHandler((error, _request, reply) => {
+  app.setErrorHandler((error, request, reply) => {
     const response = toErrorResponse(error);
+
+    request.log.error(
+      {
+        err: error,
+        errorCode: response.payload.error.code,
+        statusCode: response.statusCode,
+        method: request.method,
+        url: request.url
+      },
+      "request failed"
+    );
+
     reply.code(response.statusCode).send(response.payload);
   });
 

@@ -79,16 +79,25 @@ async function sendOtpEmail(email: string, code: string, type: "email_verificati
       ? "Use the code below to verify your RideSpot account."
       : "Use the code below to reset your RideSpot password.";
 
-  await resend.emails.send({
-    from: env.RESEND_FROM_EMAIL,
-    to: [email],
-    subject,
-    html: `<div style="font-family:Inter,Arial,sans-serif;line-height:1.5;color:#111827">
-      <p>${intro}</p>
-      <p style="font-size:28px;font-weight:700;letter-spacing:0.12em">${code}</p>
-      <p>This code expires in 10 minutes.</p>
-    </div>`
-  });
+  try {
+    await resend.emails.send({
+      from: env.RESEND_FROM_EMAIL,
+      to: [email],
+      subject,
+      html: `<div style="font-family:Inter,Arial,sans-serif;line-height:1.5;color:#111827">
+        <p>${intro}</p>
+        <p style="font-size:28px;font-weight:700;letter-spacing:0.12em">${code}</p>
+        <p>This code expires in 10 minutes.</p>
+      </div>`
+    });
+  } catch (error) {
+    throw new AppError(
+      502,
+      "EMAIL_DELIVERY_FAILED",
+      "Account was created, but the verification email could not be sent. Check Resend settings, then use resend OTP.",
+      error
+    );
+  }
 
   return {
     delivered: true

@@ -11,6 +11,7 @@ const logPath = path.join(logsDir, `next-build-${timestamp}.log`);
 const nextBin = require.resolve("next/dist/bin/next");
 const tscBin = require.resolve("typescript/bin/tsc");
 const phaseTimeoutMs = 390000;
+const isVercel = process.env.VERCEL === "1";
 
 mkdirSync(logsDir, { recursive: true });
 
@@ -23,14 +24,19 @@ function write(message) {
 function runPhase(name, command, args, options = {}) {
   write(JSON.stringify({ event: "phase_started", name, command, args }));
 
+  const phaseEnv = {
+    ...process.env,
+    NEXT_TELEMETRY_DISABLED: "1",
+    ...(options.env ?? {})
+  };
+
+  if (!isVercel && !phaseEnv.NEXT_DIST_DIR) {
+    phaseEnv.NEXT_DIST_DIR = ".next-prod";
+  }
+
   const result = spawnSync(command, args, {
     cwd: root,
-    env: {
-      ...process.env,
-      NEXT_DIST_DIR: ".next-prod",
-      NEXT_TELEMETRY_DISABLED: "1",
-      ...(options.env ?? {})
-    },
+    env: phaseEnv,
     encoding: "utf8",
     maxBuffer: 1024 * 1024 * 50,
     timeout: phaseTimeoutMs,

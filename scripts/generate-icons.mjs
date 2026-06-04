@@ -4,7 +4,7 @@ import sharp from "sharp";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
-const source = path.join(rootDir, "public", "assets", "logo-primary.png");
+const source = path.join(rootDir, "public", "assets", "logo-light.png");
 const outputDir = path.join(rootDir, "public", "icons");
 
 const targets = [
@@ -15,13 +15,15 @@ const targets = [
 ];
 
 const sourceMetadata = await sharp(source).metadata();
-const markCropSize = Math.min(sourceMetadata.width ?? 32, sourceMetadata.height ?? 32);
+const sourceWidth = sourceMetadata.width ?? 32;
+const sourceHeight = sourceMetadata.height ?? 32;
+const markCropWidth = Math.min(sourceWidth, Math.round(sourceHeight * 0.68));
 const markSource = await sharp(source)
   .extract({
     left: 0,
     top: 0,
-    width: markCropSize,
-    height: markCropSize
+    width: markCropWidth,
+    height: sourceHeight
   })
   .trim()
   .png()

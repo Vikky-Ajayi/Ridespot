@@ -36,7 +36,7 @@ function HeroMetrics({ className = "" }: { className?: string }) {
         <p className={metricValueClassName}>
           2.4×
         </p>
-        <p className="mt-1 text-[0.95rem] leading-[1.2] text-[#6f6f6f] lg:text-[0.98rem]">
+        <p className="mt-1 whitespace-nowrap text-[0.95rem] leading-[1.2] text-[#6f6f6f] lg:text-[0.98rem]">
           Earnings boost
         </p>
       </div>
@@ -44,7 +44,7 @@ function HeroMetrics({ className = "" }: { className?: string }) {
         <p className={metricValueClassName}>
           94%
         </p>
-        <p className="mt-1 text-[0.95rem] leading-[1.2] text-[#6f6f6f] lg:text-[0.98rem]">
+        <p className="mt-1 whitespace-nowrap text-[0.95rem] leading-[1.2] text-[#6f6f6f] lg:text-[0.98rem]">
           Map accuracy
         </p>
       </div>
@@ -52,7 +52,7 @@ function HeroMetrics({ className = "" }: { className?: string }) {
         <p className={metricValueClassName}>
           12K
         </p>
-        <p className="mt-1 text-[0.95rem] leading-[1.2] text-[#6f6f6f] lg:text-[0.98rem]">
+        <p className="mt-1 whitespace-nowrap text-[0.95rem] leading-[1.2] text-[#6f6f6f] lg:text-[0.98rem]">
           Active drivers
         </p>
       </div>

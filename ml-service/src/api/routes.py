@@ -19,7 +19,6 @@ from src.api.schemas import (
     PredictionResponse,
 )
 from src.training.features import build_feature_matrix, derive_features
-from src.training.retrain import run_retraining
 from src.utils.demand_rules import apply_deterministic_rules
 from src.utils.logger import get_logger
 from src.utils.operating_policy import (
@@ -232,6 +231,8 @@ async def predict(request: PredictionRequest) -> PredictionResponse:
 
 @app.post("/retrain")
 async def trigger_retrain():
+    from src.training.retrain import run_retraining
+
     result = await run_retraining()
     if result.get("status") == "updated":
         load_model()

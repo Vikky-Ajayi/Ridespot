@@ -66,7 +66,7 @@ export function HeroSection() {
       <div className="mx-auto max-w-6xl px-4 md:px-6 lg:px-[14px]">
         <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_528px] lg:items-stretch lg:gap-[4.2rem]">
           <div className="lg:flex lg:min-h-[541px] lg:flex-col">
-            <h1 className="text-[3.25rem] font-extrabold leading-[0.9] tracking-[-0.08em] text-ink sm:text-[4rem] lg:text-[5rem]">
+            <h1 className="[font-family:Inter,sans-serif] text-[3.25rem] font-semibold leading-none tracking-[-0.08em] text-ink sm:text-[4rem] lg:text-[4rem] lg:font-semibold lg:leading-none lg:tracking-[-0.08em]">
               <span className="block whitespace-nowrap">Stop guessing.</span>
               <span className="block whitespace-nowrap">Drive where the</span>
               <span className="block whitespace-nowrap text-brand">money is.</span>

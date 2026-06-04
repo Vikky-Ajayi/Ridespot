@@ -57,7 +57,7 @@ const config: Config = {
         }
       },
       fontFamily: {
-        sans: ["Manrope", "system-ui", "sans-serif"]
+        sans: ["Inter", "system-ui", "sans-serif"]
       },
       boxShadow: {
         soft: "0 20px 40px rgba(9, 9, 9, 0.08)",

@@ -3,7 +3,7 @@
 CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
-CREATE TABLE drivers (
+CREATE TABLE IF NOT EXISTS drivers (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   full_name VARCHAR(255) NOT NULL,
   email VARCHAR(255) UNIQUE NOT NULL,
@@ -18,7 +18,7 @@ CREATE TABLE drivers (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE otp_codes (
+CREATE TABLE IF NOT EXISTS otp_codes (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   driver_id UUID REFERENCES drivers(id) ON DELETE CASCADE,
   email VARCHAR(255) NOT NULL,
@@ -29,7 +29,7 @@ CREATE TABLE otp_codes (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE driver_locations (
+CREATE TABLE IF NOT EXISTS driver_locations (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   driver_id UUID UNIQUE REFERENCES drivers(id) ON DELETE CASCADE,
   location GEOGRAPHY(POINT, 4326) NOT NULL,
@@ -37,7 +37,7 @@ CREATE TABLE driver_locations (
   last_seen TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE notification_preferences (
+CREATE TABLE IF NOT EXISTS notification_preferences (
   driver_id UUID PRIMARY KEY REFERENCES drivers(id) ON DELETE CASCADE,
   mail_notifications BOOLEAN DEFAULT TRUE,
   demand_notifications BOOLEAN DEFAULT FALSE,
@@ -46,7 +46,7 @@ CREATE TABLE notification_preferences (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE events (
+CREATE TABLE IF NOT EXISTS events (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   external_id VARCHAR(255),
   source VARCHAR(50) NOT NULL CHECK (source IN ('ticketmaster', 'eventbrite', 'manual', 'google_places')),
@@ -67,7 +67,7 @@ CREATE TABLE events (
   UNIQUE (external_id, source)
 );
 
-CREATE TABLE hotspots (
+CREATE TABLE IF NOT EXISTS hotspots (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name VARCHAR(255) NOT NULL,
   postcode VARCHAR(50),
@@ -88,14 +88,14 @@ CREATE TABLE hotspots (
   expires_at TIMESTAMPTZ
 );
 
-CREATE TABLE driver_coverage (
+CREATE TABLE IF NOT EXISTS driver_coverage (
   hotspot_id UUID REFERENCES hotspots(id) ON DELETE CASCADE,
   driver_id UUID REFERENCES drivers(id) ON DELETE CASCADE,
   entered_at TIMESTAMPTZ DEFAULT NOW(),
   PRIMARY KEY (hotspot_id, driver_id)
 );
 
-CREATE TABLE notification_logs (
+CREATE TABLE IF NOT EXISTS notification_logs (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   driver_id UUID REFERENCES drivers(id) ON DELETE CASCADE,
   hotspot_id UUID REFERENCES hotspots(id),
@@ -107,7 +107,7 @@ CREATE TABLE notification_logs (
   sent_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE prediction_feedback (
+CREATE TABLE IF NOT EXISTS prediction_feedback (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   driver_id UUID REFERENCES drivers(id) ON DELETE CASCADE,
   hotspot_id UUID REFERENCES hotspots(id),

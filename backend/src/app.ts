@@ -11,6 +11,38 @@ import { registerPaymentRoutes } from "./modules/payments/payments.routes.js";
 import { registerNavigationRoutes } from "./modules/navigation/navigation.routes.js";
 import { toErrorResponse } from "./utils/http.js";
 
+function getErrorDiagnostics(error: unknown) {
+  const err = error as {
+    code?: string;
+    column?: string;
+    constraint?: string;
+    details?: unknown;
+    message?: string;
+    name?: string;
+    routine?: string;
+    stack?: string;
+    table?: string;
+  };
+
+  return {
+    code: err.code,
+    column: err.column,
+    constraint: err.constraint,
+    details:
+      err.details instanceof Error
+        ? {
+            message: err.details.message,
+            name: err.details.name
+          }
+        : undefined,
+    message: err.message ?? String(error),
+    name: err.name,
+    routine: err.routine,
+    stack: err.stack,
+    table: err.table
+  };
+}
+
 export async function buildApp() {
   const app = Fastify({
     logger: true
@@ -22,16 +54,28 @@ export async function buildApp() {
 
   app.setErrorHandler((error, request, reply) => {
     const response = toErrorResponse(error);
+    const diagnostics = getErrorDiagnostics(error);
 
     request.log.error(
       {
-        err: error,
+        ...diagnostics,
         errorCode: response.payload.error.code,
         statusCode: response.statusCode,
         method: request.method,
         url: request.url
       },
       "request failed"
+    );
+
+    console.error(
+      JSON.stringify({
+        event: "request_failed",
+        method: request.method,
+        url: request.url,
+        statusCode: response.statusCode,
+        errorCode: response.payload.error.code,
+        ...diagnostics
+      })
     );
 
     reply.code(response.statusCode).send(response.payload);

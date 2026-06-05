@@ -1,6 +1,7 @@
 import { buildApp } from "./app.js";
 import { db, verifyDatabaseConnection } from "./config/database.js";
 import { env } from "./config/env.js";
+import { runPendingMigrations } from "./config/migrations.js";
 import { redis } from "./config/redis.js";
 import { initSocketServer } from "./websocket/socket.server.js";
 
@@ -9,6 +10,7 @@ async function start() {
   initSocketServer(app.server);
 
   await verifyDatabaseConnection();
+  await runPendingMigrations();
 
   await app.listen({
     host: "::",

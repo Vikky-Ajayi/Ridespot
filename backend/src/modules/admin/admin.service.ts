@@ -2,6 +2,7 @@ import bcrypt from "bcrypt";
 import { query } from "../../config/database.js";
 import { redis } from "../../config/redis.js";
 import { getModelHealth, triggerModelRetrain } from "../../services/ml.service.js";
+import { getIntegrationStatuses } from "../../services/integrationHealth.service.js";
 import { assertMarketCountry } from "../../utils/country.js";
 import { geographyPointSql, getHotspotsWithCoverage, selectLatLng } from "../../utils/geospatial.js";
 import { AppError } from "../../utils/http.js";
@@ -260,6 +261,10 @@ export const adminService = {
         workerStartCommand: "npm --prefix backend run start:worker"
       }
     };
+  },
+
+  async getIntegrationStatus() {
+    return getIntegrationStatuses();
   },
 
   async getNotificationLogs(limit: number) {

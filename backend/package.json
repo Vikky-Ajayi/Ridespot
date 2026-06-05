@@ -14,6 +14,7 @@
     "smoke:auth-flow": "node scripts/smoke-auth-flow.mjs",
     "smoke:event-ingestion": "node scripts/smoke-event-ingestion.mjs",
     "smoke:hotspot-refresh": "node scripts/smoke-hotspot-refresh.mjs",
+    "smoke:integrations": "node scripts/smoke-integrations.mjs",
     "smoke:ml-integration": "node scripts/smoke-ml-integration.mjs",
     "smoke:payment-fcm-live": "node scripts/smoke-payment-fcm-live.mjs",
     "smoke:realtime-cleanup": "node scripts/smoke-realtime-cleanup.mjs",

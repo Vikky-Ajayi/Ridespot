@@ -45,6 +45,10 @@ export const adminController = {
     return sendSuccess(reply, await adminService.getHotspotDiagnostics());
   },
 
+  async getIntegrationStatus(_request: FastifyRequest, reply: FastifyReply) {
+    return sendSuccess(reply, await adminService.getIntegrationStatus());
+  },
+
   async getNotificationLogs(request: FastifyRequest, reply: FastifyReply) {
     const query = listQuerySchema.parse(request.query);
     return sendSuccess(reply, await adminService.getNotificationLogs(query.limit));

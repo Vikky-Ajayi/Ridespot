@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import random
+import warnings
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -57,7 +58,14 @@ app = FastAPI(title="RideSpot ML Service", version="1.0.0", lifespan=lifespan)
 
 def load_model() -> None:
     try:
-        registry.model = joblib.load(MODEL_PATH)
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=r".*If you are loading a serialized model.*",
+                category=UserWarning,
+                module=r"xgboost\.core",
+            )
+            registry.model = joblib.load(MODEL_PATH)
         registry.encoders = joblib.load(ENCODER_PATH)
         registry.scaler = joblib.load(SCALER_PATH)
         with METADATA_PATH.open("r", encoding="utf-8") as handle:

@@ -12,7 +12,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { PasswordInput } from "@/components/ui/PasswordInput";
-import { getApiErrorMessage } from "@/lib/apiError";
+import { getApiErrorCode, getApiErrorMessage } from "@/lib/apiError";
 import { authRepository } from "@/services/repositories";
 
 const loginSchema = z.object({
@@ -45,6 +45,26 @@ export default function LoginPage() {
       login({ token: response.token, user: response.user });
       router.push("/app/home");
     } catch (error) {
+      if (getApiErrorCode(error) === "EMAIL_NOT_VERIFIED") {
+        const params = new URLSearchParams({ email: values.email.trim().toLowerCase() });
+
+        try {
+          const resendResponse = await authRepository.resendOtp({
+            email: values.email,
+            type: "email_verification"
+          });
+
+          if (resendResponse.devOtp) {
+            params.set("code", resendResponse.devOtp);
+          }
+        } catch {
+          // The verification screen still lets the driver retry resend manually.
+        }
+
+        router.push(`/verify-email?${params.toString()}`);
+        return;
+      }
+
       setFormError(getApiErrorMessage(error, "Unable to sign in. Please try again."));
     }
   });

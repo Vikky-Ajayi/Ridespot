@@ -64,6 +64,98 @@ function shouldUseDevelopmentOtpFallback() {
   return env.NODE_ENV !== "production" && env.RESEND_API_KEY.startsWith("dev-");
 }
 
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function buildOtpEmailHtml(email: string, code: string, type: "email_verification" | "password_reset") {
+  const escapedCode = escapeHtml(code);
+  const escapedEmail = escapeHtml(email);
+  const isVerification = type === "email_verification";
+  const heading = isVerification ? "Verify your RideSpot email" : "Reset your RideSpot password";
+  const eyebrow = isVerification ? "Account verification" : "Password reset";
+  const intro = isVerification
+    ? "Enter this 6-digit code to finish creating your driver account and unlock live demand intelligence."
+    : "Enter this 6-digit code to choose a new password for your RideSpot account.";
+  const actionPath = isVerification ? "/verify-email" : "/enter-otp";
+  const actionUrl = `${env.FRONTEND_URL}${actionPath}?email=${encodeURIComponent(email)}`;
+  const actionText = isVerification ? "Open verification page" : "Open reset page";
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>${escapeHtml(heading)}</title>
+  </head>
+  <body style="margin:0;background:#f4f6f5;padding:0;font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;color:#06130f;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
+      Your RideSpot code is ${escapedCode}. It expires in 10 minutes.
+    </div>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f4f6f5;">
+      <tr>
+        <td align="center" style="padding:32px 16px;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#ffffff;border-radius:28px;overflow:hidden;border:1px solid #e6ebe8;box-shadow:0 18px 48px rgba(6,19,15,0.08);">
+            <tr>
+              <td style="background:#06130f;padding:28px 28px 30px;">
+                <div style="font-size:32px;line-height:1;font-weight:800;letter-spacing:-1.6px;color:#ffffff;">
+                  ride<span style="color:#14d46f;">spot</span>
+                </div>
+                <div style="margin-top:18px;display:inline-block;border-radius:999px;background:rgba(20,212,111,0.14);padding:8px 12px;color:#14d46f;font-size:12px;line-height:1;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;">
+                  ${escapeHtml(eyebrow)}
+                </div>
+                <h1 style="margin:20px 0 0;font-size:34px;line-height:0.98;font-weight:800;letter-spacing:-2.4px;color:#ffffff;">
+                  ${escapeHtml(heading)}
+                </h1>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:30px 28px 8px;">
+                <p style="margin:0;color:#5f6965;font-size:16px;line-height:1.55;font-weight:500;">
+                  ${escapeHtml(intro)}
+                </p>
+                <div style="margin:26px 0 22px;border-radius:22px;background:#e7fbef;border:1px solid #c6f3d9;padding:24px;text-align:center;">
+                  <div style="color:#4f5c57;font-size:12px;line-height:1;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;">
+                    Your code
+                  </div>
+                  <div style="margin-top:12px;color:#06130f;font-size:44px;line-height:1;font-weight:800;letter-spacing:9px;">
+                    ${escapedCode}
+                  </div>
+                  <div style="margin-top:12px;color:#66726d;font-size:13px;line-height:1.4;font-weight:600;">
+                    Expires in 10 minutes
+                  </div>
+                </div>
+                <a href="${escapeHtml(actionUrl)}" style="display:block;border-radius:18px;background:#06130f;color:#ffffff;text-decoration:none;text-align:center;padding:17px 20px;font-size:16px;line-height:1;font-weight:800;letter-spacing:-0.4px;">
+                  ${escapeHtml(actionText)}
+                </a>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:18px 28px 30px;">
+                <div style="border-top:1px solid #edf0ee;padding-top:18px;">
+                  <p style="margin:0;color:#7a8580;font-size:13px;line-height:1.55;font-weight:500;">
+                    This code was requested for <strong style="color:#06130f;">${escapedEmail}</strong>. If this was not you, you can ignore this email.
+                  </p>
+                  <p style="margin:16px 0 0;color:#9aa39f;font-size:12px;line-height:1.5;font-weight:500;">
+                    RideSpot helps ride-hailing drivers position smarter with live hotspot intelligence.
+                  </p>
+                </div>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+}
+
 async function sendOtpEmail(email: string, code: string, type: "email_verification" | "password_reset") {
   if (shouldUseDevelopmentOtpFallback()) {
     return {
@@ -84,11 +176,8 @@ async function sendOtpEmail(email: string, code: string, type: "email_verificati
       from: env.RESEND_FROM_EMAIL,
       to: [email],
       subject,
-      html: `<div style="font-family:Inter,Arial,sans-serif;line-height:1.5;color:#111827">
-        <p>${intro}</p>
-        <p style="font-size:28px;font-weight:700;letter-spacing:0.12em">${code}</p>
-        <p>This code expires in 10 minutes.</p>
-      </div>`
+      text: `${intro}\n\nCode: ${code}\n\nThis code expires in 10 minutes.`,
+      html: buildOtpEmailHtml(email, code, type)
     });
   } catch (error) {
     throw new AppError(

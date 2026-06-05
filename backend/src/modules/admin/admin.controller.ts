@@ -41,6 +41,10 @@ export const adminController = {
     return sendSuccess(reply, await adminService.getActiveHotspots());
   },
 
+  async getHotspotDiagnostics(_request: FastifyRequest, reply: FastifyReply) {
+    return sendSuccess(reply, await adminService.getHotspotDiagnostics());
+  },
+
   async getNotificationLogs(request: FastifyRequest, reply: FastifyReply) {
     const query = listQuerySchema.parse(request.query);
     return sendSuccess(reply, await adminService.getNotificationLogs(query.limit));
@@ -75,4 +79,3 @@ export const adminController = {
     return sendSuccess(reply, await adminService.deleteEvent(request.params.id));
   }
 };
-

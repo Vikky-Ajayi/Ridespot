@@ -128,7 +128,7 @@ async function upsertHotspots(hotspots: GeneratedHotspot[]) {
 
   await withTransaction(async (client) => {
     for (const hotspot of hotspots) {
-      await client.query(
+      const upsertResult = await client.query<{ id: string }>(
         `INSERT INTO hotspots (
          name, postcode, location, radius_meters, demand_level, demand_score, live_score,
            drive_time_text, distance_text, driver_saturation, ml_confidence, prediction_mode,
@@ -161,7 +161,8 @@ async function upsertHotspots(hotspots: GeneratedHotspot[]) {
            active_time_start = EXCLUDED.active_time_start,
            active_time_end = EXCLUDED.active_time_end,
            generated_at = NOW(),
-           expires_at = EXCLUDED.expires_at`,
+           expires_at = EXCLUDED.expires_at
+         RETURNING id`,
         [
           hotspot.name,
           hotspot.postcode,
@@ -187,13 +188,72 @@ async function upsertHotspots(hotspots: GeneratedHotspot[]) {
           hotspot.expiresAt
         ]
       );
+
+      const hotspotId = upsertResult.rows[0]?.id;
+      if (!hotspotId) {
+        continue;
+      }
+
+      await client.query(
+        `INSERT INTO hotspot_snapshots (
+           hotspot_id, event_id, name, postcode, location, radius_meters,
+           demand_level, demand_score, live_score, drive_time_text, distance_text,
+           driver_saturation, ml_confidence, prediction_mode, is_high_confidence,
+           operating_confidence_threshold, operating_accuracy_target, fallback_reason,
+           routing_decision, insight_text, drivers_needed, active_time_start, active_time_end,
+           generated_at
+         ) VALUES (
+           $1, $2, $3, $4, ST_SetSRID(ST_MakePoint($6, $5), 4326)::geography, $7,
+           $8, $9, $10, '8 min', '5.2 KM',
+           $11, $12, $13, $14,
+           $15, $16, $17,
+           $18, $19, $20, $21, $22,
+           NOW()
+         )`,
+        [
+          hotspotId,
+          hotspot.eventId,
+          hotspot.name,
+          hotspot.postcode,
+          hotspot.lat,
+          hotspot.lng,
+          hotspot.radiusMeters,
+          hotspot.demandLevel,
+          hotspot.demandScore,
+          hotspot.liveScore,
+          hotspot.driverSaturation,
+          hotspot.mlConfidence,
+          hotspot.predictionMode,
+          hotspot.isHighConfidence,
+          hotspot.operatingConfidenceThreshold,
+          hotspot.operatingAccuracyTarget,
+          hotspot.fallbackReason,
+          hotspot.routingDecision,
+          hotspot.insightText,
+          hotspot.driversNeeded,
+          hotspot.activeTimeStart,
+          hotspot.activeTimeEnd
+        ]
+      );
     }
+
+    await client.query(
+      `DELETE FROM hotspot_snapshots
+       WHERE generated_at < NOW() - INTERVAL '48 hours'`
+    );
   });
 }
 
 async function generateHotspotsFromEvents() {
   const upcomingEvents = await eventsService.getActiveEventsWindow();
   const hotspots: GeneratedHotspot[] = [];
+
+  console.info(
+    JSON.stringify({
+      event: "hotspot_refresh_active_events_loaded",
+      activeEvents: upcomingEvents.length
+    })
+  );
 
   for (const event of upcomingEvents) {
     const currentDrivers = await driversNear(event.lat, event.lng);
@@ -241,6 +301,19 @@ async function generateHotspotsFromEvents() {
   }
 
   await upsertHotspots(hotspots);
+
+  const fallbackCount = hotspots.filter(
+    (hotspot) => hotspot.predictionMode === "conservative-fallback"
+  ).length;
+
+  console.info(
+    JSON.stringify({
+      event: "hotspot_refresh_generated",
+      generatedHotspots: hotspots.length,
+      mlFallbackHotspots: fallbackCount
+    })
+  );
+
   return hotspots;
 }
 
@@ -258,7 +331,7 @@ function groupCoverageByMarket(hotspots: HotspotCoverage[]) {
 }
 
 export async function runHotspotRefreshCycle() {
-  await generateHotspotsFromEvents();
+  const generatedHotspots = await generateHotspotsFromEvents();
 
   const refreshedHotspots = await hotspotService.listBroadcastHotspots();
 
@@ -290,10 +363,20 @@ export async function runHotspotRefreshCycle() {
     );
   }
 
-  return {
+  const summary = {
+    generated: generatedHotspots.length,
     refreshed: refreshedHotspots.length,
     evaluatedCoverage: coverageHotspots.length
   };
+
+  console.info(
+    JSON.stringify({
+      event: "hotspot_refresh_cycle_completed",
+      ...summary
+    })
+  );
+
+  return summary;
 }
 
 export function createHotspotRefreshWorker() {

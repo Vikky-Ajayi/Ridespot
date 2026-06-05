@@ -193,6 +193,75 @@ export const adminService = {
     return getHotspotsWithCoverage();
   },
 
+  async getHotspotDiagnostics() {
+    const [
+      eventsTotal,
+      activeEventsWindow,
+      currentHotspotsTotal,
+      activeRealtimeHotspots,
+      snapshotsTotal,
+      delayedSnapshotsEligible,
+      lastCurrentHotspot,
+      lastSnapshot
+    ] = await Promise.all([
+      query<{ count: string }>(`SELECT COUNT(*)::text AS count FROM events WHERE is_active = TRUE`),
+      query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count
+         FROM events
+         WHERE is_active = TRUE
+           AND start_time <= NOW() + INTERVAL '3 hours'
+           AND COALESCE(end_time, start_time + INTERVAL '3 hours') >= NOW()`
+      ),
+      query<{ count: string }>(`SELECT COUNT(*)::text AS count FROM hotspots WHERE is_active = TRUE`),
+      query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count
+         FROM hotspots
+         WHERE is_active = TRUE
+           AND (expires_at IS NULL OR expires_at > NOW())`
+      ),
+      query<{ count: string }>(`SELECT COUNT(*)::text AS count FROM hotspot_snapshots`),
+      query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count
+         FROM (
+           SELECT DISTINCT ON (hotspot_id) hotspot_id
+           FROM hotspot_snapshots
+           WHERE generated_at <= NOW() - INTERVAL '30 minutes'
+             AND generated_at >= NOW() - INTERVAL '24 hours'
+             AND (active_time_end IS NULL OR active_time_end >= NOW())
+           ORDER BY hotspot_id, generated_at DESC
+         ) delayed`
+      ),
+      query<{ generated_at: string | null }>(
+        `SELECT MAX(generated_at)::text AS generated_at FROM hotspots`
+      ),
+      query<{ generated_at: string | null }>(
+        `SELECT MAX(generated_at)::text AS generated_at FROM hotspot_snapshots`
+      )
+    ]);
+
+    const delayedEligibleCount = Number(delayedSnapshotsEligible.rows[0]?.count ?? 0);
+
+    return {
+      events: {
+        activeTotal: Number(eventsTotal.rows[0]?.count ?? 0),
+        activeInRefreshWindow: Number(activeEventsWindow.rows[0]?.count ?? 0)
+      },
+      hotspots: {
+        currentTotal: Number(currentHotspotsTotal.rows[0]?.count ?? 0),
+        activeRealtime: Number(activeRealtimeHotspots.rows[0]?.count ?? 0),
+        snapshotsTotal: Number(snapshotsTotal.rows[0]?.count ?? 0),
+        delayedSnapshotsEligible: delayedEligibleCount,
+        freePlanCanReturnSuggestions: delayedEligibleCount > 0,
+        lastCurrentGeneratedAt: lastCurrentHotspot.rows[0]?.generated_at ?? null,
+        lastSnapshotGeneratedAt: lastSnapshot.rows[0]?.generated_at ?? null
+      },
+      railway: {
+        apiStartCommand: "npm --prefix backend run start",
+        workerStartCommand: "npm --prefix backend run start:worker"
+      }
+    };
+  },
+
   async getNotificationLogs(limit: number) {
     const result = await query<{
       id: string;

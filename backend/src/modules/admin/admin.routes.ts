@@ -26,6 +26,11 @@ export async function registerAdminRoutes(app: FastifyInstance) {
   app.get("/drivers/online", { preHandler: adminMiddleware }, adminController.getOnlineDrivers);
   app.get("/hotspots/active", { preHandler: adminMiddleware }, adminController.getActiveHotspots);
   app.get(
+    "/hotspots/diagnostics",
+    { preHandler: adminMiddleware },
+    adminController.getHotspotDiagnostics
+  );
+  app.get(
     "/notifications/logs",
     { preHandler: adminMiddleware },
     adminController.getNotificationLogs

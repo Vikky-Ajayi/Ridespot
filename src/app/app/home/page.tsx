@@ -33,7 +33,7 @@ export default function HomePage() {
     error: searchError,
     selectSuggestion
   } = usePlacesAutocomplete();
-  const { allHotspots, position, isStale, refreshPosition } = useHotspots();
+  const { allHotspots, position, isStale, loading, refreshPosition } = useHotspots();
   const { showToast } = useToast();
   const startNavigation = useStartNavigation();
   const [mapFocusLocation, setMapFocusLocation] = useState<DriverLocation | null>(null);
@@ -191,14 +191,29 @@ export default function HomePage() {
               ) : null}
 
               <div className="space-y-4">
-                {allHotspots.map((hotspot) => (
-                  <HotspotCard
-                    key={hotspot.id}
-                    hotspot={hotspot}
-                    onDriveThere={handleStartNavigation}
-                    onOpenDetails={openHotspotDetails}
-                  />
-                ))}
+                {loading ? (
+                  <div className="rounded-2xl bg-[#F4F6F8] px-4 py-4 text-[0.82rem] font-medium leading-tight text-[#667085]">
+                    Loading hotspot suggestions...
+                  </div>
+                ) : null}
+
+                {!loading && !isStale && allHotspots.length === 0 ? (
+                  <div className="rounded-2xl bg-[#F4F6F8] px-4 py-4 text-[0.82rem] font-medium leading-tight text-[#667085]">
+                    No active hotspot suggestions yet. We&apos;re checking live event demand and
+                    will update this list as soon as new zones are available.
+                  </div>
+                ) : null}
+
+                {!loading
+                  ? allHotspots.map((hotspot) => (
+                      <HotspotCard
+                        key={hotspot.id}
+                        hotspot={hotspot}
+                        onDriveThere={handleStartNavigation}
+                        onOpenDetails={openHotspotDetails}
+                      />
+                    ))
+                  : null}
               </div>
             </div>
           </motion.section>

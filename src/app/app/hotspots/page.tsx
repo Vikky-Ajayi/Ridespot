@@ -17,7 +17,7 @@ export default function HotspotsPage() {
   const router = useRouter();
   const filter = useHotspotStore((state) => state.filter);
   const setFilter = useHotspotStore((state) => state.setFilter);
-  const { hotspots, isStale, position } = useHotspots(filter);
+  const { hotspots, isStale, loading, position } = useHotspots(filter);
   const startNavigation = useStartNavigation();
   const openHotspotDetails = useModalStore((state) => state.openHotspotDetails);
 
@@ -55,18 +55,33 @@ export default function HotspotsPage() {
             </div>
           ) : null}
 
-          {hotspots.map((hotspot) => (
-            <HotspotCard
-              key={hotspot.id}
-              hotspot={hotspot}
-              onDriveThere={(selectedHotspot) => {
-                void startNavigation(selectedHotspot, position ?? FALLBACK_DRIVER_LOCATION)
-                  .then(() => router.push("/app/home"))
-                  .catch(() => undefined);
-              }}
-              onOpenDetails={openHotspotDetails}
-            />
-          ))}
+          {loading ? (
+            <div className="rounded-2xl bg-white px-4 py-5 text-[0.86rem] font-medium leading-tight text-[#667085]">
+              Loading hotspot suggestions...
+            </div>
+          ) : null}
+
+          {!loading && !isStale && hotspots.length === 0 ? (
+            <div className="rounded-2xl bg-white px-4 py-5 text-[0.86rem] font-medium leading-tight text-[#667085]">
+              No active hotspot suggestions yet. New demand zones will appear here when live event
+              signals are available.
+            </div>
+          ) : null}
+
+          {!loading
+            ? hotspots.map((hotspot) => (
+                <HotspotCard
+                  key={hotspot.id}
+                  hotspot={hotspot}
+                  onDriveThere={(selectedHotspot) => {
+                    void startNavigation(selectedHotspot, position ?? FALLBACK_DRIVER_LOCATION)
+                      .then(() => router.push("/app/home"))
+                      .catch(() => undefined);
+                  }}
+                  onOpenDetails={openHotspotDetails}
+                />
+              ))
+            : null}
         </div>
 
         <BottomNav active="hotspots" />

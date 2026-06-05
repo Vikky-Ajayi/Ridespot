@@ -192,37 +192,98 @@ export const hotspotService = {
     limit: number;
     planTier: PlanTier;
   }) {
-    const freshnessFilter =
-      options.planTier === "free" ? `AND h.generated_at < NOW() - INTERVAL '30 minutes'` : "";
+    const delayedForFreePlan = options.planTier === "free";
+    const result = delayedForFreePlan
+      ? await query<HotspotRow>(
+          `WITH latest_delayed_snapshots AS (
+             SELECT DISTINCT ON (s.hotspot_id)
+               s.hotspot_id AS id,
+               s.name,
+               s.postcode,
+               s.demand_level,
+               s.demand_score,
+               s.live_score,
+               s.drivers_needed,
+               s.drive_time_text,
+               s.distance_text,
+               s.driver_saturation,
+               s.ml_confidence,
+               s.prediction_mode,
+               s.is_high_confidence,
+               s.operating_confidence_threshold,
+               s.operating_accuracy_target,
+               s.fallback_reason,
+               s.routing_decision,
+               s.insight_text,
+               s.active_time_start,
+               s.active_time_end,
+               s.generated_at,
+               NULL::timestamptz AS expires_at,
+               s.event_id,
+               s.location
+             FROM hotspot_snapshots s
+             WHERE s.generated_at <= NOW() - INTERVAL '30 minutes'
+               AND s.generated_at >= NOW() - INTERVAL '24 hours'
+               AND (s.active_time_end IS NULL OR s.active_time_end >= NOW())
+             ORDER BY s.hotspot_id, s.generated_at DESC
+           )
+           SELECT
+             s.*,
+             e.city,
+             e.country,
+             e.raw_data AS event_raw_data,
+             ${selectLatLng("s.location")},
+             ST_Distance(s.location, ${geographyPointSql("$2", "$1")}) AS distance_meters,
+             (
+               SELECT COUNT(*)
+               FROM driver_coverage dc
+               WHERE dc.hotspot_id = s.id
+             ) AS drivers_in_zone
+           FROM latest_delayed_snapshots s
+           LEFT JOIN events e ON e.id = s.event_id
+           WHERE ST_DWithin(s.location, ${geographyPointSql("$2", "$1")}, $3)
+           ORDER BY s.demand_score DESC, s.generated_at DESC
+           LIMIT $4`,
+          [options.lat, options.lng, options.radius, options.limit]
+        )
+      : await query<HotspotRow>(
+          `SELECT
+             h.*,
+             e.city,
+             e.country,
+             e.raw_data AS event_raw_data,
+             ${selectLatLng("h.location")},
+             ST_Distance(h.location, ${geographyPointSql("$2", "$1")}) AS distance_meters,
+             (
+               SELECT COUNT(*)
+               FROM driver_coverage dc
+               WHERE dc.hotspot_id = h.id
+             ) AS drivers_in_zone
+           FROM hotspots h
+           LEFT JOIN events e ON e.id = h.event_id
+           WHERE h.is_active = TRUE
+             AND (h.expires_at IS NULL OR h.expires_at > NOW())
+             AND ST_DWithin(h.location, ${geographyPointSql("$2", "$1")}, $3)
+           ORDER BY h.demand_score DESC, h.generated_at DESC
+           LIMIT $4`,
+          [options.lat, options.lng, options.radius, options.limit]
+        );
 
-    const result = await query<HotspotRow>(
-      `SELECT
-         h.*,
-         e.city,
-         e.country,
-         e.raw_data AS event_raw_data,
-         ${selectLatLng("h.location")},
-         ST_Distance(h.location, ${geographyPointSql("$2", "$1")}) AS distance_meters,
-         (
-           SELECT COUNT(*)
-           FROM driver_coverage dc
-           WHERE dc.hotspot_id = h.id
-         ) AS drivers_in_zone
-       FROM hotspots h
-       LEFT JOIN events e ON e.id = h.event_id
-       WHERE h.is_active = TRUE
-         AND (h.expires_at IS NULL OR h.expires_at > NOW())
-         ${freshnessFilter}
-         AND ST_DWithin(h.location, ${geographyPointSql("$2", "$1")}, $3)
-       ORDER BY h.demand_score DESC
-       LIMIT $4`,
-      [options.lat, options.lng, options.radius, options.limit]
+    console.info(
+      JSON.stringify({
+        event: "hotspots_query_completed",
+        planTier: options.planTier,
+        freshness: delayedForFreePlan ? "delayed" : "realtime",
+        count: result.rows.length,
+        radiusMeters: options.radius
+      })
     );
 
     return {
       hotspots: result.rows.map(mapHotspot),
       total: result.rows.length,
-      generatedAt: new Date().toISOString()
+      generatedAt: result.rows[0]?.generated_at ?? new Date().toISOString(),
+      freshness: delayedForFreePlan ? "delayed" : "realtime"
     };
   },
 

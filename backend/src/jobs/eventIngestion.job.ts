@@ -21,10 +21,23 @@ export async function ensureEventIngestionSchedule() {
   );
 }
 
+export async function runEventIngestionCycle() {
+  const result = await eventsService.ingestEvents();
+  console.info(
+    JSON.stringify({
+      event: "event_ingestion_cycle_completed",
+      ingestedEvents: result.total,
+      errors: result.errors.length,
+      errorSources: result.errors.map((item) => `${item.city}:${item.source}`)
+    })
+  );
+  return result;
+}
+
 export function createEventIngestionWorker() {
   return new Worker(
     EVENT_QUEUE_NAME,
-    async (_job: Job) => eventsService.ingestEvents(),
+    async (_job: Job) => runEventIngestionCycle(),
     {
       connection: getRedisConnectionOptions()
     }

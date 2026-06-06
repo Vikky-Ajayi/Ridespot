@@ -1,5 +1,6 @@
 import axios from "axios";
 import { env } from "../config/env.js";
+import { fetchPublicEventbriteEventsNear } from "./eventbrite.service.js";
 
 type IntegrationName =
   | "hereMaps"
@@ -346,112 +347,49 @@ export async function checkGoogleRoutes(): Promise<IntegrationStatus> {
 }
 
 export async function checkEventbrite(): Promise<IntegrationStatus> {
-  if (!env.EVENTBRITE_API_KEY) {
+  if (!env.EVENTBRITE_API_KEY && !env.EVENTBRITE_PUBLIC_SCRAPER_ENABLED && !env.EVENT_AGGREGATOR_API_KEY) {
     return status({
       name: "eventbrite",
       configured: false,
       reachable: false,
       canIngest: false,
       statusCode: null,
-      message: "EVENTBRITE_API_KEY is missing"
+      message: "No Eventbrite public discovery source is configured"
     });
   }
 
-  const headers = {
-    Authorization: `Bearer ${env.EVENTBRITE_API_KEY}`
-  };
-
   try {
-    const userResponse = await axios.get("https://www.eventbriteapi.com/v3/users/me/", {
-      headers,
-      timeout: 15000,
-      validateStatus: () => true
-    });
-
-    if (userResponse.status < 200 || userResponse.status >= 300) {
-      return status({
-        name: "eventbrite",
-        configured: true,
-        reachable: false,
-        canIngest: false,
-        statusCode: userResponse.status,
-        message: "Eventbrite token was rejected by /users/me/"
-      });
-    }
-
-    const orgResponse = await axios.get("https://www.eventbriteapi.com/v3/users/me/organizations/", {
-      headers,
-      timeout: 15000,
-      validateStatus: () => true
-    });
-
-    const organizations = Array.isArray(orgResponse.data?.organizations)
-      ? orgResponse.data.organizations
-      : [];
-    const organizationCount = organizations.length;
-    const organizationId =
-      organizations[0]?.id && typeof organizations[0].id === "string"
-        ? organizations[0].id
-        : null;
-
-    if (!organizationId) {
-      return status({
-        name: "eventbrite",
-        configured: true,
-        reachable: orgResponse.status >= 200 && orgResponse.status < 300,
-        canIngest: false,
-        statusCode: orgResponse.status,
-        message: "Eventbrite API is reachable, but this token has no organizations to ingest events from",
-        details: { organizationCount, eventCount: 0, eventsWithVenueCoordinates: 0 }
-      });
-    }
-
-    const eventsResponse = await axios.get(
-      `https://www.eventbriteapi.com/v3/organizations/${organizationId}/events/`,
-      {
-        headers,
-        params: {
-          time_filter: "current_future",
-          page_size: 5
-        },
-        timeout: 20000,
-        validateStatus: () => true
-      }
-    );
-
-    const events = Array.isArray(eventsResponse.data?.events) ? eventsResponse.data.events : [];
-    const venueIds: string[] = events
-      .map((event: Record<string, unknown>) => event.venue_id)
-      .filter((id: unknown): id is string => typeof id === "string" && id.length > 0);
-    const venueResults = await Promise.allSettled(
-      venueIds.map((venueId) =>
-        axios.get(`https://www.eventbriteapi.com/v3/venues/${venueId}/`, {
-          headers,
-          timeout: 10000,
-          validateStatus: () => true
-        })
-      )
-    );
-    const eventsWithVenueCoordinates = venueResults.filter((result) => {
-      if (result.status !== "fulfilled" || result.value.status < 200 || result.value.status >= 300) {
-        return false;
-      }
-
-      const venue = result.value.data;
-      return Boolean(venue?.latitude && venue?.longitude);
-    }).length;
+    const [londonResult, lagosResult] = await Promise.all([
+      fetchPublicEventbriteEventsNear({
+        lat: 51.5072,
+        lng: -0.1276,
+        radiusMeters: 15000,
+        city: "London",
+        country: "UK"
+      }),
+      fetchPublicEventbriteEventsNear({
+        lat: 6.5244,
+        lng: 3.3792,
+        radiusMeters: 15000,
+        city: "Lagos",
+        country: "Nigeria"
+      })
+    ]);
+    const eventCount = londonResult.events.length + lagosResult.events.length;
+    const diagnostics = [...londonResult.diagnostics, ...lagosResult.diagnostics];
+    const reachable = diagnostics.some((item) => item.status === "ok");
 
     return status({
       name: "eventbrite",
       configured: true,
-      reachable: eventsResponse.status >= 200 && eventsResponse.status < 300,
-      canIngest: eventsWithVenueCoordinates > 0,
-      statusCode: eventsResponse.status,
+      reachable,
+      canIngest: eventCount > 0,
+      statusCode: null,
       message:
-        eventsWithVenueCoordinates > 0
-          ? "Eventbrite API is reachable and future events with venue coordinates are available"
-          : "Eventbrite API is reachable, but no future sampled events have venue coordinates for hotspot generation",
-      details: { organizationCount, eventCount: events.length, eventsWithVenueCoordinates }
+        eventCount > 0
+          ? "Eventbrite public discovery produced geocoded public events"
+          : "Eventbrite public discovery is configured but did not produce geocoded public events",
+      details: { eventCount, diagnostics }
     });
   } catch (error) {
     return status({

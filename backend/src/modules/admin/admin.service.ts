@@ -203,7 +203,9 @@ export const adminService = {
       snapshotsTotal,
       delayedSnapshotsEligible,
       lastCurrentHotspot,
-      lastSnapshot
+      lastSnapshot,
+      areaRefreshTotal,
+      latestAreaRefresh
     ] = await Promise.all([
       query<{ count: string }>(`SELECT COUNT(*)::text AS count FROM events WHERE is_active = TRUE`),
       query<{ count: string }>(
@@ -237,6 +239,28 @@ export const adminService = {
       ),
       query<{ generated_at: string | null }>(
         `SELECT MAX(generated_at)::text AS generated_at FROM hotspot_snapshots`
+      ),
+      query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count
+         FROM area_refreshes`
+      ),
+      query<{
+        area_key: string;
+        status: string;
+        completed_at: string | null;
+        ticketmaster_events: string | number;
+        eventbrite_events: string | number;
+        generated_hotspots: string | number;
+        ml_fallback_hotspots: string | number;
+        here_traffic_available: boolean;
+        last_error: string | null;
+      }>(
+        `SELECT area_key, status, completed_at::text AS completed_at,
+                ticketmaster_events, eventbrite_events, generated_hotspots,
+                ml_fallback_hotspots, here_traffic_available, last_error
+         FROM area_refreshes
+         ORDER BY updated_at DESC
+         LIMIT 1`
       )
     ]);
 
@@ -255,6 +279,22 @@ export const adminService = {
         freePlanCanReturnSuggestions: delayedEligibleCount > 0,
         lastCurrentGeneratedAt: lastCurrentHotspot.rows[0]?.generated_at ?? null,
         lastSnapshotGeneratedAt: lastSnapshot.rows[0]?.generated_at ?? null
+      },
+      areaRefreshes: {
+        total: Number(areaRefreshTotal.rows[0]?.count ?? 0),
+        latest: latestAreaRefresh.rows[0]
+          ? {
+              areaKey: latestAreaRefresh.rows[0].area_key,
+              status: latestAreaRefresh.rows[0].status,
+              completedAt: latestAreaRefresh.rows[0].completed_at,
+              ticketmasterEvents: Number(latestAreaRefresh.rows[0].ticketmaster_events ?? 0),
+              eventbriteEvents: Number(latestAreaRefresh.rows[0].eventbrite_events ?? 0),
+              generatedHotspots: Number(latestAreaRefresh.rows[0].generated_hotspots ?? 0),
+              mlFallbackHotspots: Number(latestAreaRefresh.rows[0].ml_fallback_hotspots ?? 0),
+              hereTrafficAvailable: Boolean(latestAreaRefresh.rows[0].here_traffic_available),
+              lastError: latestAreaRefresh.rows[0].last_error
+            }
+          : null
       },
       railway: {
         apiStartCommand: "npm --prefix backend run start",

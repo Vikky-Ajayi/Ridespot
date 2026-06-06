@@ -39,3 +39,39 @@ export async function fetchTicketmasterEvents(city: string, countryCode: "GB" | 
     .map((event: Record<string, unknown>) => normaliseTicketmasterEvent(event))
     .filter((event: EventInput | null): event is EventInput => Boolean(event));
 }
+
+export async function fetchTicketmasterEventsNear(input: {
+  lat: number;
+  lng: number;
+  radiusMeters: number;
+}) {
+  if (!env.TICKETMASTER_API_KEY) {
+    return [] as EventInput[];
+  }
+
+  const now = new Date();
+  const sevenDaysFromNow = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const radiusKm = Math.max(1, Math.ceil(input.radiusMeters / 1000));
+
+  const response = await ticketmasterClient.get("/events.json", {
+    params: {
+      apikey: env.TICKETMASTER_API_KEY,
+      latlong: `${input.lat},${input.lng}`,
+      radius: radiusKm,
+      unit: "km",
+      startDateTime: ticketmasterDateTime(now),
+      endDateTime: ticketmasterDateTime(sevenDaysFromNow),
+      size: 200,
+      sort: "date,asc"
+    }
+  });
+
+  const events =
+    response.data?._embedded?.events && Array.isArray(response.data._embedded.events)
+      ? response.data._embedded.events
+      : [];
+
+  return events
+    .map((event: Record<string, unknown>) => normaliseTicketmasterEvent(event))
+    .filter((event: EventInput | null): event is EventInput => Boolean(event));
+}

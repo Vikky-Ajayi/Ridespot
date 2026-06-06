@@ -7,6 +7,7 @@ import {
 } from "../../utils/geospatial.js";
 import { AppError } from "../../utils/http.js";
 import type { PlanTier } from "../../utils/jwt.js";
+import { areaRefreshService } from "./areaRefresh.service.js";
 
 interface HotspotRow {
   id: string;
@@ -192,6 +193,11 @@ export const hotspotService = {
     limit: number;
     planTier: PlanTier;
   }) {
+    const areaRefresh = await areaRefreshService.ensureFresh({
+      lat: options.lat,
+      lng: options.lng,
+      radius: options.radius
+    });
     const delayedForFreePlan = options.planTier === "free";
     const result = delayedForFreePlan
       ? await query<HotspotRow>(
@@ -275,7 +281,10 @@ export const hotspotService = {
         planTier: options.planTier,
         freshness: delayedForFreePlan ? "delayed" : "realtime",
         count: result.rows.length,
-        radiusMeters: options.radius
+        radiusMeters: options.radius,
+        areaKey: areaRefresh.areaKey,
+        refreshing: areaRefresh.refreshing,
+        lastRefreshedAt: areaRefresh.lastRefreshedAt
       })
     );
 
@@ -283,7 +292,10 @@ export const hotspotService = {
       hotspots: result.rows.map(mapHotspot),
       total: result.rows.length,
       generatedAt: result.rows[0]?.generated_at ?? new Date().toISOString(),
-      freshness: delayedForFreePlan ? "delayed" : "realtime"
+      freshness: delayedForFreePlan ? "delayed" : "realtime",
+      refreshing: areaRefresh.refreshing,
+      lastRefreshedAt: areaRefresh.lastRefreshedAt,
+      providerDiagnostics: areaRefresh.providerDiagnostics
     };
   },
 

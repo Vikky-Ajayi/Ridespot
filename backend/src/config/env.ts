@@ -1,6 +1,22 @@
 import "dotenv/config";
 import { z } from "zod";
 
+const booleanFromEnv = z.preprocess((value) => {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+
+  return value;
+}, z.boolean());
+
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(4000),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -14,6 +30,12 @@ const envSchema = z.object({
   RESEND_FROM_EMAIL: z.string().email("RESEND_FROM_EMAIL must be a valid email"),
   TICKETMASTER_API_KEY: z.string().default(""),
   EVENTBRITE_API_KEY: z.string().default(""),
+  EVENTBRITE_OFFICIAL_DISCOVERY_ENABLED: booleanFromEnv.default(true),
+  EVENTBRITE_PUBLIC_SCRAPER_ENABLED: booleanFromEnv.default(true),
+  EVENTBRITE_SCRAPER_USER_AGENT: z.string().default("RideSpotBot/1.0 (+https://heyzono.com)"),
+  EVENT_AGGREGATOR_PROVIDER: z.string().default(""),
+  EVENT_AGGREGATOR_API_KEY: z.string().default(""),
+  PUBLIC_EVENT_REFRESH_TTL_SECONDS: z.coerce.number().int().positive().default(600),
   GOOGLE_MAPS_API_KEY: z.string().default(""),
   HERE_MAPS_API_KEY: z.string().default(""),
   ML_SERVICE_URL: z.string().url(),

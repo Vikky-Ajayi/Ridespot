@@ -9,7 +9,7 @@ dotenv.config({ path: resolve(backendRoot, ".env") });
 const timeout = setTimeout(() => {
   console.error("smoke:integrations timed out");
   process.exit(1);
-}, 45000);
+}, 70000);
 
 let exitCode = 0;
 

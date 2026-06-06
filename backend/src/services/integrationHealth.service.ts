@@ -52,7 +52,7 @@ export async function checkHereMaps(): Promise<IntegrationStatus> {
         in: "circle:51.556,-0.2796;r=300",
         locationReferencing: "none"
       },
-      timeout: 8000,
+      timeout: 15000,
       validateStatus: () => true
     });
 
@@ -105,7 +105,7 @@ export async function checkTicketmaster(): Promise<IntegrationStatus> {
         Accept: "application/json",
         "User-Agent": "RideSpotIntegrationHealth/1.0"
       },
-      timeout: 8000,
+      timeout: 15000,
       validateStatus: () => true
     });
 
@@ -159,7 +159,7 @@ export async function checkEventbrite(): Promise<IntegrationStatus> {
   try {
     const userResponse = await axios.get("https://www.eventbriteapi.com/v3/users/me/", {
       headers,
-      timeout: 8000,
+      timeout: 15000,
       validateStatus: () => true
     });
 
@@ -176,7 +176,7 @@ export async function checkEventbrite(): Promise<IntegrationStatus> {
 
     const orgResponse = await axios.get("https://www.eventbriteapi.com/v3/users/me/organizations/", {
       headers,
-      timeout: 8000,
+      timeout: 15000,
       validateStatus: () => true
     });
 
@@ -184,18 +184,69 @@ export async function checkEventbrite(): Promise<IntegrationStatus> {
       ? orgResponse.data.organizations
       : [];
     const organizationCount = organizations.length;
+    const organizationId =
+      organizations[0]?.id && typeof organizations[0].id === "string"
+        ? organizations[0].id
+        : null;
+
+    if (!organizationId) {
+      return status({
+        name: "eventbrite",
+        configured: true,
+        reachable: orgResponse.status >= 200 && orgResponse.status < 300,
+        canIngest: false,
+        statusCode: orgResponse.status,
+        message: "Eventbrite API is reachable, but this token has no organizations to ingest events from",
+        details: { organizationCount, eventCount: 0, eventsWithVenueCoordinates: 0 }
+      });
+    }
+
+    const eventsResponse = await axios.get(
+      `https://www.eventbriteapi.com/v3/organizations/${organizationId}/events/`,
+      {
+        headers,
+        params: {
+          time_filter: "current_future",
+          page_size: 5
+        },
+        timeout: 20000,
+        validateStatus: () => true
+      }
+    );
+
+    const events = Array.isArray(eventsResponse.data?.events) ? eventsResponse.data.events : [];
+    const venueIds: string[] = events
+      .map((event: Record<string, unknown>) => event.venue_id)
+      .filter((id: unknown): id is string => typeof id === "string" && id.length > 0);
+    const venueResults = await Promise.allSettled(
+      venueIds.map((venueId) =>
+        axios.get(`https://www.eventbriteapi.com/v3/venues/${venueId}/`, {
+          headers,
+          timeout: 10000,
+          validateStatus: () => true
+        })
+      )
+    );
+    const eventsWithVenueCoordinates = venueResults.filter((result) => {
+      if (result.status !== "fulfilled" || result.value.status < 200 || result.value.status >= 300) {
+        return false;
+      }
+
+      const venue = result.value.data;
+      return Boolean(venue?.latitude && venue?.longitude);
+    }).length;
 
     return status({
       name: "eventbrite",
       configured: true,
-      reachable: orgResponse.status >= 200 && orgResponse.status < 300,
-      canIngest: organizationCount > 0,
-      statusCode: orgResponse.status,
+      reachable: eventsResponse.status >= 200 && eventsResponse.status < 300,
+      canIngest: eventsWithVenueCoordinates > 0,
+      statusCode: eventsResponse.status,
       message:
-        organizationCount > 0
-          ? "Eventbrite API is reachable and organizations are available"
-          : "Eventbrite API is reachable, but this token has no organizations to ingest events from",
-      details: { organizationCount }
+        eventsWithVenueCoordinates > 0
+          ? "Eventbrite API is reachable and future events with venue coordinates are available"
+          : "Eventbrite API is reachable, but no future sampled events have venue coordinates for hotspot generation",
+      details: { organizationCount, eventCount: events.length, eventsWithVenueCoordinates }
     });
   } catch (error) {
     return status({
@@ -210,11 +261,10 @@ export async function checkEventbrite(): Promise<IntegrationStatus> {
 }
 
 export async function getIntegrationStatuses() {
-  const integrations = await Promise.all([
-    checkHereMaps(),
-    checkTicketmaster(),
-    checkEventbrite()
-  ]);
+  const integrations = [];
+  integrations.push(await checkHereMaps());
+  integrations.push(await checkTicketmaster());
+  integrations.push(await checkEventbrite());
 
   return {
     integrations,

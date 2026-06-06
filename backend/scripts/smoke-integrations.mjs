@@ -9,7 +9,7 @@ dotenv.config({ path: resolve(backendRoot, ".env") });
 const timeout = setTimeout(() => {
   console.error("smoke:integrations timed out");
   process.exit(1);
-}, 70000);
+}, 120000);
 
 let exitCode = 0;
 
@@ -18,7 +18,13 @@ try {
     pathToFileURL(resolve(backendRoot, "dist/services/integrationHealth.service.js")).href
   );
   const result = await getIntegrationStatuses();
-  const requiredProviders = ["hereMaps", "ticketmaster"];
+  const requiredProviders = [
+    "hereMaps",
+    "googlePlacesAutocomplete",
+    "googlePlacesNearby",
+    "googleRoutes",
+    "ticketmaster"
+  ];
   const failedRequired = result.integrations.filter(
     (item) => requiredProviders.includes(item.name) && !item.canIngest
   );

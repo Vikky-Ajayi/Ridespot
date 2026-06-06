@@ -1,7 +1,13 @@
 import axios from "axios";
 import { env } from "../config/env.js";
 
-type IntegrationName = "hereMaps" | "ticketmaster" | "eventbrite";
+type IntegrationName =
+  | "hereMaps"
+  | "ticketmaster"
+  | "eventbrite"
+  | "googlePlacesAutocomplete"
+  | "googlePlacesNearby"
+  | "googleRoutes";
 
 interface IntegrationStatus {
   name: IntegrationName;
@@ -140,6 +146,205 @@ export async function checkTicketmaster(): Promise<IntegrationStatus> {
   }
 }
 
+export async function checkGooglePlacesAutocomplete(): Promise<IntegrationStatus> {
+  if (!env.GOOGLE_MAPS_API_KEY) {
+    return status({
+      name: "googlePlacesAutocomplete",
+      configured: false,
+      reachable: false,
+      canIngest: false,
+      statusCode: null,
+      message: "GOOGLE_MAPS_API_KEY is missing"
+    });
+  }
+
+  try {
+    const response = await axios.get(
+      "https://maps.googleapis.com/maps/api/place/autocomplete/json",
+      {
+        params: {
+          input: "Lagos event centre",
+          components: "country:ng",
+          key: env.GOOGLE_MAPS_API_KEY
+        },
+        timeout: 15000,
+        validateStatus: () => true
+      }
+    );
+
+    const predictionCount = Array.isArray(response.data?.predictions)
+      ? response.data.predictions.length
+      : 0;
+    const googleStatus = response.data?.status ?? null;
+    const ok = response.status >= 200 && response.status < 300 && googleStatus === "OK";
+
+    return status({
+      name: "googlePlacesAutocomplete",
+      configured: true,
+      reachable: response.status >= 200 && response.status < 300,
+      canIngest: ok && predictionCount > 0,
+      statusCode: response.status,
+      message:
+        ok && predictionCount > 0
+          ? "Google Places Autocomplete is reachable and returning predictions"
+          : "Google Places Autocomplete did not return usable predictions",
+      details: {
+        googleStatus,
+        predictionCount,
+        errorMessage: response.data?.error_message ?? null
+      }
+    });
+  } catch (error) {
+    return status({
+      name: "googlePlacesAutocomplete",
+      configured: true,
+      reachable: false,
+      canIngest: false,
+      statusCode: axios.isAxiosError(error) ? error.response?.status ?? null : null,
+      message: errorMessage(error)
+    });
+  }
+}
+
+export async function checkGooglePlacesNearby(): Promise<IntegrationStatus> {
+  if (!env.GOOGLE_MAPS_API_KEY) {
+    return status({
+      name: "googlePlacesNearby",
+      configured: false,
+      reachable: false,
+      canIngest: false,
+      statusCode: null,
+      message: "GOOGLE_MAPS_API_KEY is missing"
+    });
+  }
+
+  try {
+    const response = await axios.get("https://maps.googleapis.com/maps/api/place/nearbysearch/json", {
+      params: {
+        location: "51.556,-0.2796",
+        radius: 300,
+        type: "point_of_interest",
+        key: env.GOOGLE_MAPS_API_KEY
+      },
+      timeout: 15000,
+      validateStatus: () => true
+    });
+
+    const resultCount = Array.isArray(response.data?.results) ? response.data.results.length : 0;
+    const googleStatus = response.data?.status ?? null;
+    const ok = response.status >= 200 && response.status < 300 && googleStatus === "OK";
+
+    return status({
+      name: "googlePlacesNearby",
+      configured: true,
+      reachable: response.status >= 200 && response.status < 300,
+      canIngest: ok && resultCount > 0,
+      statusCode: response.status,
+      message:
+        ok && resultCount > 0
+          ? "Google Places Nearby Search is reachable and returning nearby places"
+          : "Google Places Nearby Search did not return usable nearby places",
+      details: {
+        googleStatus,
+        resultCount,
+        errorMessage: response.data?.error_message ?? null
+      }
+    });
+  } catch (error) {
+    return status({
+      name: "googlePlacesNearby",
+      configured: true,
+      reachable: false,
+      canIngest: false,
+      statusCode: axios.isAxiosError(error) ? error.response?.status ?? null : null,
+      message: errorMessage(error)
+    });
+  }
+}
+
+export async function checkGoogleRoutes(): Promise<IntegrationStatus> {
+  if (!env.GOOGLE_MAPS_API_KEY) {
+    return status({
+      name: "googleRoutes",
+      configured: false,
+      reachable: false,
+      canIngest: false,
+      statusCode: null,
+      message: "GOOGLE_MAPS_API_KEY is missing"
+    });
+  }
+
+  try {
+    const response = await axios.post(
+      "https://routes.googleapis.com/directions/v2:computeRoutes",
+      {
+        origin: {
+          location: {
+            latLng: {
+              latitude: 51.556,
+              longitude: -0.2796
+            }
+          }
+        },
+        destination: {
+          location: {
+            latLng: {
+              latitude: 51.5033,
+              longitude: -0.1195
+            }
+          }
+        },
+        travelMode: "DRIVE",
+        routingPreference: "TRAFFIC_AWARE",
+        computeAlternativeRoutes: false,
+        languageCode: "en",
+        units: "METRIC"
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "X-Goog-Api-Key": env.GOOGLE_MAPS_API_KEY,
+          "X-Goog-FieldMask": "routes.duration,routes.distanceMeters"
+        },
+        timeout: 15000,
+        validateStatus: () => true
+      }
+    );
+
+    const routes = Array.isArray(response.data?.routes) ? response.data.routes : [];
+    const firstRoute = routes[0] as { duration?: string; distanceMeters?: number } | undefined;
+    const ok = response.status >= 200 && response.status < 300 && routes.length > 0;
+
+    return status({
+      name: "googleRoutes",
+      configured: true,
+      reachable: response.status >= 200 && response.status < 300,
+      canIngest: ok,
+      statusCode: response.status,
+      message:
+        ok
+          ? "Google Routes API is reachable and returning driving routes"
+          : "Google Routes API did not return a usable driving route",
+      details: {
+        routeCount: routes.length,
+        distanceMeters: firstRoute?.distanceMeters ?? null,
+        duration: firstRoute?.duration ?? null,
+        googleStatus: response.data?.error?.status ?? null,
+        errorMessage: response.data?.error?.message ?? null
+      }
+    });
+  } catch (error) {
+    return status({
+      name: "googleRoutes",
+      configured: true,
+      reachable: false,
+      canIngest: false,
+      statusCode: axios.isAxiosError(error) ? error.response?.status ?? null : null,
+      message: errorMessage(error)
+    });
+  }
+}
+
 export async function checkEventbrite(): Promise<IntegrationStatus> {
   if (!env.EVENTBRITE_API_KEY) {
     return status({
@@ -263,6 +468,9 @@ export async function checkEventbrite(): Promise<IntegrationStatus> {
 export async function getIntegrationStatuses() {
   const integrations = [];
   integrations.push(await checkHereMaps());
+  integrations.push(await checkGooglePlacesAutocomplete());
+  integrations.push(await checkGooglePlacesNearby());
+  integrations.push(await checkGoogleRoutes());
   integrations.push(await checkTicketmaster());
   integrations.push(await checkEventbrite());
 

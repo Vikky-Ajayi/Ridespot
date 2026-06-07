@@ -1,4 +1,5 @@
 import axios from "axios";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { query, withTransaction } from "../../config/database.js";
 import { env } from "../../config/env.js";
 import { assertMarketCountry, type MarketCountry } from "../../utils/country.js";
@@ -8,6 +9,12 @@ import type { PlanTier } from "../../utils/jwt.js";
 type PaidPlanTier = Exclude<PlanTier, "free">;
 type PaymentProvider = "flutterwave" | "sumup";
 type PaymentStatus = "pending" | "active" | "cancelled" | "expired" | "failed";
+
+interface WebhookVerification {
+  signature?: string | null;
+  signatureHeader?: string | null;
+  rawBody?: string | null;
+}
 
 interface DriverPaymentRow {
   id: string;
@@ -129,13 +136,27 @@ async function getDriver(driverId: string) {
 }
 
 function requireProviderConfig(provider: PaymentProvider) {
-  if (provider === "flutterwave" && !env.FLUTTERWAVE_SECRET_KEY) {
-    throw new AppError(503, "PAYMENT_PROVIDER_UNCONFIGURED", "Flutterwave credentials are missing");
+  if (provider === "flutterwave" && !getFlutterwaveStandardSecretKey()) {
+    throw new AppError(
+      503,
+      "PAYMENT_PROVIDER_UNCONFIGURED",
+      "Flutterwave hosted checkout requires FLUTTERWAVE_SECRET_KEY. CLIENT_ID and CLIENT_SECRET are OAuth credentials and cannot create hosted checkout links unless the client secret is an FLWSECK secret key."
+    );
   }
 
   if (provider === "sumup" && (!env.SUMUP_API_KEY || !env.SUMUP_MERCHANT_CODE)) {
     throw new AppError(503, "PAYMENT_PROVIDER_UNCONFIGURED", "SumUp credentials are missing");
   }
+}
+
+function getFlutterwaveStandardSecretKey() {
+  if (env.FLUTTERWAVE_SECRET_KEY) {
+    return env.FLUTTERWAVE_SECRET_KEY;
+  }
+
+  // Some Flutterwave dashboards label the Standard Checkout secret as "client secret".
+  // Only treat it as a checkout bearer token when it has Flutterwave's FLWSECK prefix.
+  return env.FLUTTERWAVE_CLIENT_SECRET.startsWith("FLWSECK") ? env.FLUTTERWAVE_CLIENT_SECRET : "";
 }
 
 async function createFlutterwaveCheckout(input: {
@@ -146,6 +167,7 @@ async function createFlutterwaveCheckout(input: {
   currency: string;
   driver: DriverPaymentRow;
 }) {
+  const secretKey = getFlutterwaveStandardSecretKey();
   const planId =
     input.tier === "pro" ? env.FLUTTERWAVE_PRO_PLAN_ID_NG : env.FLUTTERWAVE_FLEET_PLAN_ID_NG;
 
@@ -174,7 +196,7 @@ async function createFlutterwaveCheckout(input: {
     },
     {
       headers: {
-        Authorization: `Bearer ${env.FLUTTERWAVE_SECRET_KEY}`
+        Authorization: `Bearer ${secretKey}`
       },
       timeout: 15000
     }
@@ -378,10 +400,48 @@ function isSuccessfulWebhook(payload: unknown) {
   const status = String(data.status ?? root.status ?? data.transaction_status ?? "").toLowerCase();
   const event = String(root.event ?? root.type ?? "").toLowerCase();
   return (
-    ["successful", "success", "paid", "completed", "confirmed"].includes(status) ||
+    ["successful", "success", "paid", "completed", "confirmed", "succeeded"].includes(status) ||
     event.includes("charge.completed") ||
+    event.includes("charge.succeeded") ||
     event.includes("checkout.paid")
   );
+}
+
+function safeEqual(left: string, right: string) {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function verifyFlutterwaveWebhook(verification?: WebhookVerification) {
+  if (!env.FLUTTERWAVE_WEBHOOK_SECRET) {
+    return;
+  }
+
+  const signature = verification?.signature?.trim();
+  if (!signature) {
+    throw new AppError(401, "UNAUTHORIZED", "Missing Flutterwave webhook signature");
+  }
+
+  if (verification?.signatureHeader === "flutterwave-signature") {
+    if (!verification.rawBody) {
+      throw new AppError(401, "UNAUTHORIZED", "Missing raw webhook body for Flutterwave signature verification");
+    }
+
+    const expected = createHmac("sha256", env.FLUTTERWAVE_WEBHOOK_SECRET)
+      .update(verification.rawBody)
+      .digest("base64");
+
+    if (!safeEqual(signature, expected)) {
+      throw new AppError(401, "UNAUTHORIZED", "Invalid Flutterwave webhook signature");
+    }
+
+    return;
+  }
+
+  if (!safeEqual(signature, env.FLUTTERWAVE_WEBHOOK_SECRET)) {
+    throw new AppError(401, "UNAUTHORIZED", "Invalid Flutterwave webhook signature");
+  }
 }
 
 async function activateSubscription(referenceOrProviderId: string, providerPaymentId: string | null) {
@@ -522,15 +582,18 @@ export const paymentsService = {
     };
   },
 
-  async processWebhook(provider: PaymentProvider, payload: unknown, signature?: string | null) {
-    if (provider === "flutterwave" && env.FLUTTERWAVE_WEBHOOK_SECRET) {
-      if (signature !== env.FLUTTERWAVE_WEBHOOK_SECRET) {
-        throw new AppError(401, "UNAUTHORIZED", "Invalid Flutterwave webhook signature");
-      }
+  async processWebhook(provider: PaymentProvider, payload: unknown, verification?: WebhookVerification | string | null) {
+    const normalizedVerification =
+      typeof verification === "string" || verification == null
+        ? { signature: verification }
+        : verification;
+
+    if (provider === "flutterwave") {
+      verifyFlutterwaveWebhook(normalizedVerification);
     }
 
     if (provider === "sumup" && env.SUMUP_WEBHOOK_SECRET) {
-      if (signature !== env.SUMUP_WEBHOOK_SECRET) {
+      if (normalizedVerification?.signature !== env.SUMUP_WEBHOOK_SECRET) {
         throw new AppError(401, "UNAUTHORIZED", "Invalid SumUp webhook signature");
       }
     }

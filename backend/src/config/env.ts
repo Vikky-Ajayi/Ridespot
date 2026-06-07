@@ -42,6 +42,8 @@ const envSchema = z.object({
   FIREBASE_PROJECT_ID: z.string().default(""),
   FIREBASE_PRIVATE_KEY: z.string().default(""),
   FIREBASE_CLIENT_EMAIL: z.string().default(""),
+  FLUTTERWAVE_CLIENT_ID: z.string().default(""),
+  FLUTTERWAVE_CLIENT_SECRET: z.string().default(""),
   FLUTTERWAVE_PUBLIC_KEY: z.string().default(""),
   FLUTTERWAVE_SECRET_KEY: z.string().default(""),
   FLUTTERWAVE_ENCRYPTION_KEY: z.string().default(""),

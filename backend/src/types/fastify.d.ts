@@ -11,5 +11,6 @@ declare module "fastify" {
   interface FastifyRequest {
     user?: AuthTokenPayload;
     admin?: AdminTokenPayload;
+    rawBody?: string;
   }
 }

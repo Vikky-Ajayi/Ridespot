@@ -13,6 +13,7 @@
     "smoke:admin": "node scripts/smoke-admin.mjs",
     "smoke:auth-flow": "node scripts/smoke-auth-flow.mjs",
     "smoke:event-ingestion": "node scripts/smoke-event-ingestion.mjs",
+    "smoke:flutterwave": "node scripts/smoke-flutterwave.mjs",
     "smoke:hotspot-refresh": "node scripts/smoke-hotspot-refresh.mjs",
     "smoke:integrations": "node scripts/smoke-integrations.mjs",
     "smoke:ml-integration": "node scripts/smoke-ml-integration.mjs",

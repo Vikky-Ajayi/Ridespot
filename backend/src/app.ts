@@ -49,6 +49,23 @@ export async function buildApp() {
     logger: true
   });
 
+  app.removeContentTypeParser("application/json");
+  app.addContentTypeParser("application/json", { parseAs: "string" }, (request, body, done) => {
+    const rawBody = Buffer.isBuffer(body) ? body.toString("utf8") : body;
+    request.rawBody = rawBody;
+
+    if (!rawBody) {
+      done(null, {});
+      return;
+    }
+
+    try {
+      done(null, JSON.parse(rawBody));
+    } catch (error) {
+      done(error as Error, undefined);
+    }
+  });
+
   await registerCors(app);
   await registerRateLimit(app);
   await app.register(jwtPlugin);

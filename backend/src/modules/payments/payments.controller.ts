@@ -26,10 +26,23 @@ export const paymentsController = {
   },
 
   async flutterwaveWebhook(request: FastifyRequest, reply: FastifyReply) {
+    const flutterwaveSignature = request.headers["flutterwave-signature"]?.toString();
+    const verifHash = request.headers["verif-hash"]?.toString();
+    const legacySignature = request.headers["x-flw-signature"]?.toString();
     const result = await paymentsService.processWebhook(
       "flutterwave",
       request.body,
-      request.headers["x-flw-signature"]?.toString() ?? null
+      {
+        signature: flutterwaveSignature ?? verifHash ?? legacySignature ?? null,
+        signatureHeader: flutterwaveSignature
+          ? "flutterwave-signature"
+          : verifHash
+            ? "verif-hash"
+            : legacySignature
+              ? "x-flw-signature"
+              : null,
+        rawBody: request.rawBody ?? null
+      }
     );
     return sendSuccess(reply, result);
   },
@@ -38,7 +51,9 @@ export const paymentsController = {
     const result = await paymentsService.processWebhook(
       "sumup",
       request.body,
-      request.headers["x-sumup-signature"]?.toString() ?? null
+      {
+        signature: request.headers["x-sumup-signature"]?.toString() ?? null
+      }
     );
     return sendSuccess(reply, result);
   }

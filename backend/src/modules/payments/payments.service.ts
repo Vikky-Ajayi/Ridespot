@@ -60,6 +60,15 @@ const PROVIDER_BY_COUNTRY: Record<MarketCountry, PaymentProvider> = {
   UK: "sumup"
 };
 
+const FLUTTERWAVE_OAUTH_URL =
+  "https://idp.flutterwave.com/realms/flutterwave/protocol/openid-connect/token";
+const FLUTTERWAVE_V4_BASE_URLS = {
+  live: "https://f4bexperience.flutterwave.com",
+  test: "https://developersandbox-api.flutterwave.com"
+} as const;
+
+let flutterwaveTokenCache: { accessToken: string; expiresAtMs: number } | null = null;
+
 function amountMajor(amountMinor: number) {
   return Number((amountMinor / 100).toFixed(2));
 }
@@ -116,7 +125,7 @@ function mapDriver(driver: DriverPaymentRow) {
 }
 
 function checkoutReference(driverId: string, tier: PaidPlanTier) {
-  return `rs_${tier}_${Date.now()}_${driverId.slice(0, 8)}`;
+  return `rs${tier}${Date.now()}${driverId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8)}`;
 }
 
 async function getDriver(driverId: string) {
@@ -136,11 +145,11 @@ async function getDriver(driverId: string) {
 }
 
 function requireProviderConfig(provider: PaymentProvider) {
-  if (provider === "flutterwave" && !getFlutterwaveStandardSecretKey()) {
+  if (provider === "flutterwave" && !hasFlutterwaveV4Config() && !getFlutterwaveStandardSecretKey()) {
     throw new AppError(
       503,
       "PAYMENT_PROVIDER_UNCONFIGURED",
-      "Flutterwave hosted checkout requires FLUTTERWAVE_SECRET_KEY. CLIENT_ID and CLIENT_SECRET are OAuth credentials and cannot create hosted checkout links unless the client secret is an FLWSECK secret key."
+      "Flutterwave V4 credentials are missing. Set FLUTTERWAVE_CLIENT_ID and FLUTTERWAVE_CLIENT_SECRET."
     );
   }
 
@@ -159,7 +168,155 @@ function getFlutterwaveStandardSecretKey() {
   return env.FLUTTERWAVE_CLIENT_SECRET.startsWith("FLWSECK") ? env.FLUTTERWAVE_CLIENT_SECRET : "";
 }
 
+function hasFlutterwaveV4Config() {
+  return Boolean(env.FLUTTERWAVE_CLIENT_ID && env.FLUTTERWAVE_CLIENT_SECRET);
+}
+
+function flutterwaveBaseUrl() {
+  return FLUTTERWAVE_V4_BASE_URLS[env.FLUTTERWAVE_ENV];
+}
+
+async function getFlutterwaveAccessToken() {
+  if (!hasFlutterwaveV4Config()) {
+    throw new AppError(503, "PAYMENT_PROVIDER_UNCONFIGURED", "Flutterwave V4 credentials are missing");
+  }
+
+  const now = Date.now();
+  if (flutterwaveTokenCache && flutterwaveTokenCache.expiresAtMs > now + 60_000) {
+    return flutterwaveTokenCache.accessToken;
+  }
+
+  const body = new URLSearchParams({
+    grant_type: "client_credentials",
+    client_id: env.FLUTTERWAVE_CLIENT_ID,
+    client_secret: env.FLUTTERWAVE_CLIENT_SECRET
+  });
+
+  const response = await axios.post(FLUTTERWAVE_OAUTH_URL, body, {
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    timeout: 15000
+  });
+
+  const data = response.data as { access_token?: string; expires_in?: number };
+  if (!data.access_token) {
+    throw new AppError(502, "PAYMENT_PROVIDER_ERROR", "Flutterwave V4 OAuth did not return an access token");
+  }
+
+  flutterwaveTokenCache = {
+    accessToken: data.access_token,
+    expiresAtMs: now + Math.max(60, data.expires_in ?? 600) * 1000
+  };
+
+  return data.access_token;
+}
+
+function splitName(fullName: string) {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  const first = parts[0] ?? "RideSpot";
+  const last = parts.slice(1).join(" ") || "Driver";
+  return { first, last };
+}
+
+function parsePhone(phone: string | null) {
+  if (!phone) {
+    return undefined;
+  }
+
+  const digits = phone.replace(/\D/g, "");
+  if (!digits) {
+    return undefined;
+  }
+
+  if (digits.startsWith("234") && digits.length > 3) {
+    return { country_code: "234", number: digits.slice(3) };
+  }
+
+  if (digits.startsWith("0") && digits.length > 1) {
+    return { country_code: "234", number: digits.slice(1) };
+  }
+
+  return { country_code: "234", number: digits };
+}
+
 async function createFlutterwaveCheckout(input: {
+  subscriptionId: string;
+  reference: string;
+  tier: PaidPlanTier;
+  amountMinor: number;
+  currency: string;
+  driver: DriverPaymentRow;
+}) {
+  if (hasFlutterwaveV4Config()) {
+    return createFlutterwaveV4Checkout(input);
+  }
+
+  return createFlutterwaveLegacyCheckout(input);
+}
+
+async function createFlutterwaveV4Checkout(input: {
+  subscriptionId: string;
+  reference: string;
+  tier: PaidPlanTier;
+  amountMinor: number;
+  currency: string;
+  driver: DriverPaymentRow;
+}) {
+  const accessToken = await getFlutterwaveAccessToken();
+  const name = splitName(input.driver.full_name);
+  const traceId = input.reference;
+  const response = await axios.post(
+    `${flutterwaveBaseUrl()}/orchestration/direct-charges`,
+    {
+      amount: amountMajor(input.amountMinor),
+      currency: input.currency,
+      reference: input.reference,
+      redirect_url: defaultSuccessUrl(input.reference),
+      customer: {
+        email: input.driver.email,
+        name,
+        phone: parsePhone(input.driver.phone)
+      },
+      payment_method: {
+        type: env.FLUTTERWAVE_PAYMENT_METHOD || "opay"
+      },
+      meta: {
+        subscriptionId: input.subscriptionId,
+        driverId: input.driver.id,
+        tier: input.tier
+      }
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "X-Trace-Id": traceId,
+        "X-Idempotency-Key": input.reference
+      },
+      timeout: 15000
+    }
+  );
+
+  const data = response.data as {
+    data?: {
+      id?: string;
+      next_action?: {
+        redirect_url?: {
+          url?: string;
+        };
+      };
+    };
+  };
+  const checkoutUrl = data.data?.next_action?.redirect_url?.url;
+  if (!checkoutUrl) {
+    throw new AppError(502, "PAYMENT_PROVIDER_ERROR", "Flutterwave V4 did not return a redirect URL");
+  }
+
+  return {
+    checkoutUrl,
+    providerCheckoutId: data.data?.id ?? null
+  };
+}
+
+async function createFlutterwaveLegacyCheckout(input: {
   subscriptionId: string;
   reference: string;
   tier: PaidPlanTier;
@@ -268,7 +425,7 @@ function normaliseProviderStatus(value: unknown) {
 }
 
 function isPaidStatus(status: string) {
-  return ["paid", "successful", "success", "completed", "confirmed"].includes(status);
+  return ["paid", "successful", "success", "completed", "confirmed", "succeeded"].includes(status);
 }
 
 function isTerminalFailedStatus(status: string) {
@@ -356,6 +513,77 @@ async function pollSumUpSubscription(subscription: PaymentSubscriptionRow) {
   return subscription;
 }
 
+async function fetchFlutterwaveCharge(subscription: PaymentSubscriptionRow) {
+  if (!subscription.provider_checkout_id) {
+    return null;
+  }
+
+  const accessToken = await getFlutterwaveAccessToken();
+  const response = await axios.get(
+    `${flutterwaveBaseUrl()}/charges/${subscription.provider_checkout_id}`,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      timeout: 15000
+    }
+  );
+
+  return asRecord(response.data);
+}
+
+function extractFlutterwaveChargeStatus(charge: Record<string, unknown>) {
+  const data = asRecord(charge.data);
+  return normaliseProviderStatus(data.status ?? charge.status);
+}
+
+function extractFlutterwaveChargePaymentId(charge: Record<string, unknown>) {
+  const data = asRecord(charge.data);
+  return String(data.id ?? charge.id ?? data.transaction_id ?? "");
+}
+
+async function pollFlutterwaveSubscription(subscription: PaymentSubscriptionRow) {
+  if (subscription.provider !== "flutterwave" || subscription.status !== "pending") {
+    return subscription;
+  }
+
+  if (!hasFlutterwaveV4Config()) {
+    return subscription;
+  }
+
+  const charge = await fetchFlutterwaveCharge(subscription);
+  if (!charge) {
+    return subscription;
+  }
+
+  const status = extractFlutterwaveChargeStatus(charge);
+  if (isPaidStatus(status)) {
+    return activateSubscription(
+      subscription.checkout_reference,
+      extractFlutterwaveChargePaymentId(charge) || null
+    );
+  }
+
+  if (isTerminalFailedStatus(status)) {
+    return updateSubscriptionStatus(
+      subscription.id,
+      status === "expired" ? "expired" : status === "cancelled" || status === "canceled" ? "cancelled" : "failed"
+    );
+  }
+
+  return subscription;
+}
+
+async function pollProviderSubscription(subscription: PaymentSubscriptionRow) {
+  if (subscription.provider === "sumup") {
+    return pollSumUpSubscription(subscription);
+  }
+
+  if (subscription.provider === "flutterwave") {
+    return pollFlutterwaveSubscription(subscription);
+  }
+
+  return subscription;
+}
+
 async function recordWebhook(provider: PaymentProvider, eventId: string, payload: unknown) {
   const result = await query<{ id: string }>(
     `INSERT INTO payment_webhook_events (provider, provider_event_id, payload)
@@ -377,8 +605,10 @@ function extractReference(payload: unknown) {
   const data = asRecord(root.data);
   const nestedObject = asRecord(root.object);
   return String(
-    data.tx_ref ??
+    data.reference ??
+      data.tx_ref ??
       data.checkout_reference ??
+      root.reference ??
       root.tx_ref ??
       root.checkout_reference ??
       nestedObject.checkout_reference ??
@@ -391,7 +621,7 @@ function extractReference(payload: unknown) {
 function extractProviderPaymentId(payload: unknown) {
   const root = asRecord(payload);
   const data = asRecord(root.data);
-  return String(data.id ?? root.id ?? data.transaction_id ?? root.transaction_id ?? "");
+  return String(data.id ?? root.id ?? data.charge_id ?? root.charge_id ?? data.transaction_id ?? root.transaction_id ?? "");
 }
 
 function isSuccessfulWebhook(payload: unknown) {
@@ -567,7 +797,7 @@ export const paymentsService = {
     );
 
     const subscription = subscriptionResult.rows[0]
-      ? await pollSumUpSubscription(subscriptionResult.rows[0])
+      ? await pollProviderSubscription(subscriptionResult.rows[0])
       : null;
 
     if (subscription?.status === "active") {

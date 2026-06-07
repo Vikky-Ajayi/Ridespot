@@ -8,18 +8,13 @@ dotenv.config({ path: resolve(__dirname, "../.env") });
 
 const OAUTH_URL =
   "https://idp.flutterwave.com/realms/flutterwave/protocol/openid-connect/token";
-const CHECKOUT_URL = "https://api.flutterwave.com/v3/payments";
+const V4_BASE_URLS = {
+  live: "https://f4bexperience.flutterwave.com",
+  test: "https://developersandbox-api.flutterwave.com"
+};
 
 function secretAvailable(name) {
   return Boolean(process.env[name] && process.env[name].trim());
-}
-
-function standardSecretKey() {
-  const explicit = process.env.FLUTTERWAVE_SECRET_KEY?.trim();
-  if (explicit) return explicit;
-
-  const clientSecret = process.env.FLUTTERWAVE_CLIENT_SECRET?.trim() ?? "";
-  return clientSecret.startsWith("FLWSECK") ? clientSecret : "";
 }
 
 function providerError(error) {
@@ -57,54 +52,67 @@ async function smokeOAuth() {
   return {
     configured: true,
     ok: Boolean(response.data?.access_token),
+    accessToken: response.data?.access_token,
     tokenType: response.data?.token_type ?? null,
     expiresIn: response.data?.expires_in ?? null
   };
 }
 
-async function smokeStandardCheckout() {
-  const secretKey = standardSecretKey();
-  if (!secretKey) {
-    return {
-      configured: false,
-      reason:
-        "Hosted checkout needs FLUTTERWAVE_SECRET_KEY, or FLUTTERWAVE_CLIENT_SECRET must be an FLWSECK... key."
-    };
+async function smokeV4DirectCharge(accessToken) {
+  if (!accessToken) {
+    return { configured: false, reason: "OAuth did not return an access token" };
   }
 
-  const reference = `rs_smoke_${Date.now()}`;
+  const envName = process.env.FLUTTERWAVE_ENV === "test" ? "test" : "live";
+  const baseUrl = V4_BASE_URLS[envName];
+  const reference = `rsv4smoke${Date.now()}`;
+  const paymentMethod = process.env.FLUTTERWAVE_PAYMENT_METHOD?.trim() || "opay";
   const response = await axios.post(
-    CHECKOUT_URL,
+    `${baseUrl}/orchestration/direct-charges`,
     {
-      tx_ref: reference,
       amount: 100,
       currency: "NGN",
+      reference,
       redirect_url: process.env.PAYMENT_SUCCESS_URL || "https://heyzono.com/app/profile",
       customer: {
         email: "smoke-test@heyzono.com",
-        name: "RideSpot Smoke Test"
+        name: {
+          first: "RideSpot",
+          last: "Smoke"
+        },
+        phone: {
+          country_code: "234",
+          number: "8012345678"
+        }
       },
-      customizations: {
-        title: "RideSpot smoke test",
-        description: "RideSpot Flutterwave hosted checkout smoke test"
+      payment_method: {
+        type: paymentMethod
       },
       meta: {
         smokeTest: true
       }
     },
     {
-      headers: { Authorization: `Bearer ${secretKey}` },
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "X-Trace-Id": reference,
+        "X-Idempotency-Key": reference
+      },
       timeout: 15000
     }
   );
 
-  const link = response.data?.data?.link;
+  const redirectUrl = response.data?.data?.next_action?.redirect_url?.url;
   return {
     configured: true,
-    ok: Boolean(link),
+    ok: Boolean(redirectUrl),
+    environment: envName,
+    baseHost: new URL(baseUrl).host,
+    paymentMethod,
     reference,
     providerCheckoutId: response.data?.data?.id ? String(response.data.data.id) : null,
-    checkoutHost: link ? new URL(link).host : null
+    redirectHost: redirectUrl ? new URL(redirectUrl).host : null,
+    status: response.data?.data?.status ?? null
   };
 }
 
@@ -112,19 +120,19 @@ async function main() {
   const result = {
     timestamp: new Date().toISOString(),
     oauth: null,
-    standardCheckout: null
+    v4DirectCharge: null
   };
 
   try {
-    result.oauth = await smokeOAuth();
+    const oauth = await smokeOAuth();
+    result.oauth = { ...oauth, accessToken: undefined };
+    result.v4DirectCharge = await smokeV4DirectCharge(oauth.accessToken);
   } catch (error) {
-    result.oauth = { configured: true, ok: false, error: providerError(error) };
-  }
-
-  try {
-    result.standardCheckout = await smokeStandardCheckout();
-  } catch (error) {
-    result.standardCheckout = { configured: true, ok: false, error: providerError(error) };
+    if (!result.oauth) {
+      result.oauth = { configured: true, ok: false, error: providerError(error) };
+    } else {
+      result.v4DirectCharge = { configured: true, ok: false, error: providerError(error) };
+    }
   }
 
   console.log(JSON.stringify(result, null, 2));
@@ -133,7 +141,7 @@ async function main() {
     process.exitCode = 1;
   }
 
-  if (result.standardCheckout?.configured && result.standardCheckout.ok === false) {
+  if (result.v4DirectCharge?.configured && result.v4DirectCharge.ok === false) {
     process.exitCode = 1;
   }
 }

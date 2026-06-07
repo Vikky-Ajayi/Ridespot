@@ -9,6 +9,7 @@ import { registerEventRoutes } from "./modules/events/events.routes.js";
 import { registerAdminRoutes } from "./modules/admin/admin.routes.js";
 import { registerPaymentRoutes } from "./modules/payments/payments.routes.js";
 import { registerNavigationRoutes } from "./modules/navigation/navigation.routes.js";
+import { registerNotificationRoutes } from "./modules/notifications/notifications.routes.js";
 import { toErrorResponse } from "./utils/http.js";
 
 function getErrorDiagnostics(error: unknown) {
@@ -95,6 +96,7 @@ export async function buildApp() {
   await app.register(registerAdminRoutes, { prefix: "/api/admin" });
   await app.register(registerPaymentRoutes, { prefix: "/api/payments" });
   await app.register(registerNavigationRoutes, { prefix: "/api/navigation" });
+  await app.register(registerNotificationRoutes, { prefix: "/api/notifications" });
 
   return app;
 }

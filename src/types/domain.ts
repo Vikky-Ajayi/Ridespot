@@ -93,6 +93,28 @@ export interface NotificationPreferences {
   nightModeAlerts: boolean;
 }
 
+export type AppNotificationType =
+  | "hotspot_alert"
+  | "coverage_sufficient"
+  | "surge_alert"
+  | "system"
+  | "test";
+
+export interface AppNotification {
+  id: string;
+  driverId?: string | null;
+  hotspotId?: string | null;
+  type: AppNotificationType;
+  title: string;
+  body: string;
+  wasDelivered: boolean;
+  wasActedOn: boolean;
+  isRead: boolean;
+  readAt?: string | null;
+  sentAt: string;
+  data?: Record<string, unknown>;
+}
+
 export interface Profile {
   id: string;
   fullName: string;

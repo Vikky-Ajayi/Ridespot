@@ -1,16 +1,48 @@
 import { query } from "../../config/database.js";
 import { sendToMany, type PushNotificationPayload } from "../../services/fcm.service.js";
 import { getDriversInZone, type HotspotCoverage } from "../../utils/geospatial.js";
+import { AppError } from "../../utils/http.js";
 import { getSocketServer } from "../../websocket/socket.server.js";
 import { getCachedMarketConfig } from "../admin/admin.service.js";
 
 type PlanTier = "free" | "pro" | "fleet";
+type NotificationType = "hotspot_alert" | "coverage_sufficient" | "surge_alert" | "system" | "test";
 type AlertCandidate = {
   id: string;
   fcm_token: string | null;
   night_mode_alerts: boolean;
   distance_meters: number;
 };
+type NotificationRow = {
+  id: string;
+  driver_id: string | null;
+  hotspot_id: string | null;
+  type: NotificationType;
+  title: string | null;
+  body: string | null;
+  was_delivered: boolean;
+  was_acted_on: boolean;
+  read_at: Date | string | null;
+  sent_at: Date | string;
+  data: Record<string, unknown> | null;
+};
+
+function mapNotification(row: NotificationRow) {
+  return {
+    id: row.id,
+    driverId: row.driver_id,
+    hotspotId: row.hotspot_id,
+    type: row.type,
+    title: row.title ?? "RideSpot",
+    body: row.body ?? "",
+    wasDelivered: row.was_delivered,
+    wasActedOn: row.was_acted_on,
+    isRead: Boolean(row.read_at),
+    readAt: row.read_at ? new Date(row.read_at).toISOString() : null,
+    sentAt: new Date(row.sent_at).toISOString(),
+    data: row.data ?? {}
+  };
+}
 
 function marketRoom(city: string | null) {
   return city ? `market:${city.toLowerCase().replace(/\s+/g, "-")}` : "market:global";
@@ -35,25 +67,68 @@ async function sendToDrivers(tokens: string[], notification: PushNotificationPay
 async function logNotifications(
   driverIds: string[],
   hotspotId: string,
-  type: "hotspot_alert" | "coverage_sufficient" | "surge_alert",
+  type: NotificationType,
   notification: PushNotificationPayload
 ) {
   if (!driverIds.length) {
     await query(
-      `INSERT INTO notification_logs (hotspot_id, type, title, body, was_delivered)
-       VALUES ($1, $2, $3, $4, TRUE)`,
-      [hotspotId, type, notification.title, notification.body]
+      `INSERT INTO notification_logs (hotspot_id, type, title, body, was_delivered, data)
+       VALUES ($1, $2, $3, $4, TRUE, $5::jsonb)`,
+      [hotspotId, type, notification.title, notification.body, JSON.stringify(notification.data ?? {})]
     );
     return;
   }
 
   for (const driverId of driverIds) {
-    await query(
-      `INSERT INTO notification_logs (driver_id, hotspot_id, type, title, body, was_delivered)
-       VALUES ($1, $2, $3, $4, $5, TRUE)`,
-      [driverId, hotspotId, type, notification.title, notification.body]
-    );
+    await createDriverNotification({
+      driverId,
+      hotspotId,
+      type,
+      title: notification.title,
+      body: notification.body,
+      data: notification.data,
+      wasDelivered: true
+    });
   }
+}
+
+async function createDriverNotification(payload: {
+  driverId: string;
+  hotspotId?: string | null;
+  type: NotificationType;
+  title: string;
+  body: string;
+  data?: Record<string, string> | Record<string, unknown>;
+  wasDelivered?: boolean;
+}) {
+  const result = await query<NotificationRow>(
+    `INSERT INTO notification_logs (driver_id, hotspot_id, type, title, body, was_delivered, data)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+     RETURNING id, driver_id, hotspot_id, type, title, body, was_delivered, was_acted_on, read_at, sent_at, data`,
+    [
+      payload.driverId,
+      payload.hotspotId ?? null,
+      payload.type,
+      payload.title,
+      payload.body,
+      payload.wasDelivered ?? false,
+      JSON.stringify(payload.data ?? {})
+    ]
+  );
+  const row = result.rows[0];
+  if (!row) {
+    throw new AppError(500, "INTERNAL_SERVER_ERROR", "Notification could not be created");
+  }
+  const notification = mapNotification(row);
+
+  try {
+    const io = getSocketServer();
+    io.to(`driver:${payload.driverId}`).emit("notification:new", notification);
+  } catch {
+    // Worker-only contexts can persist notifications without a Socket.io server.
+  }
+
+  return notification;
 }
 
 async function getDriversToAlert(
@@ -271,23 +346,114 @@ export const notificationsService = {
   async logNotification(payload: {
     driverId?: string | null;
     hotspotId?: string | null;
-    type: "hotspot_alert" | "coverage_sufficient" | "surge_alert";
+    type: NotificationType;
     title: string;
     body: string;
+    data?: Record<string, string>;
     wasDelivered?: boolean;
   }) {
+    if (payload.driverId) {
+      await createDriverNotification({
+        driverId: payload.driverId,
+        hotspotId: payload.hotspotId,
+        type: payload.type,
+        title: payload.title,
+        body: payload.body,
+        data: payload.data,
+        wasDelivered: payload.wasDelivered
+      });
+      return;
+    }
+
     await query(
-      `INSERT INTO notification_logs (driver_id, hotspot_id, type, title, body, was_delivered)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
+      `INSERT INTO notification_logs (driver_id, hotspot_id, type, title, body, was_delivered, data)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
       [
-        payload.driverId ?? null,
+        null,
         payload.hotspotId ?? null,
         payload.type,
         payload.title,
         payload.body,
-        payload.wasDelivered ?? false
+        payload.wasDelivered ?? false,
+        JSON.stringify(payload.data ?? {})
       ]
     );
+  },
+
+  async listDriverNotifications(driverId: string, limit = 30) {
+    const safeLimit = Math.max(1, Math.min(limit, 100));
+    const result = await query<NotificationRow>(
+      `SELECT id, driver_id, hotspot_id, type, title, body, was_delivered, was_acted_on,
+              read_at, sent_at, data
+       FROM notification_logs
+       WHERE driver_id = $1
+       ORDER BY sent_at DESC
+       LIMIT $2`,
+      [driverId, safeLimit]
+    );
+    const unread = await this.getUnreadCount(driverId);
+
+    return {
+      notifications: result.rows.map(mapNotification),
+      unreadCount: unread.unreadCount
+    };
+  },
+
+  async getUnreadCount(driverId: string) {
+    const result = await query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count
+       FROM notification_logs
+       WHERE driver_id = $1
+         AND read_at IS NULL`,
+      [driverId]
+    );
+
+    return { unreadCount: Number(result.rows[0]?.count ?? 0) };
+  },
+
+  async markRead(driverId: string, notificationId: string) {
+    const result = await query<NotificationRow>(
+      `UPDATE notification_logs
+       SET read_at = COALESCE(read_at, NOW())
+       WHERE id = $1
+         AND driver_id = $2
+       RETURNING id, driver_id, hotspot_id, type, title, body, was_delivered, was_acted_on,
+                 read_at, sent_at, data`,
+      [notificationId, driverId]
+    );
+
+    if (!result.rows[0]) {
+      throw new AppError(404, "NOT_FOUND", "Notification not found");
+    }
+
+    return mapNotification(result.rows[0]);
+  },
+
+  async markAllRead(driverId: string) {
+    const result = await query<{ count: string }>(
+      `WITH updated AS (
+         UPDATE notification_logs
+         SET read_at = COALESCE(read_at, NOW())
+         WHERE driver_id = $1
+           AND read_at IS NULL
+         RETURNING id
+       )
+       SELECT COUNT(*)::text AS count FROM updated`,
+      [driverId]
+    );
+
+    return { updated: Number(result.rows[0]?.count ?? 0) };
+  },
+
+  async createTestNotification(driverId: string) {
+    return createDriverNotification({
+      driverId,
+      type: "test",
+      title: "RideSpot notifications are live",
+      body: "You will receive hotspot alerts here just like a mobile app.",
+      data: { type: "test" },
+      wasDelivered: true
+    });
   },
 
   async sendBulkNotification(options: {

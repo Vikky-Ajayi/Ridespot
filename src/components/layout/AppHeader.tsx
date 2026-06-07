@@ -4,6 +4,7 @@ import { Bell, UserRound } from "lucide-react";
 import { useMemo } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
+import { useNotificationStore } from "@/store/notification-store";
 
 type AppHeaderVariant = "home" | "hotspots" | "profile";
 
@@ -31,6 +32,8 @@ function AvatarMark() {
 
 export function AppHeader({ variant, className }: AppHeaderProps) {
   const { user } = useAuth();
+  const unreadCount = useNotificationStore((state) => state.unreadCount);
+  const openNotifications = useNotificationStore((state) => state.openCenter);
   const firstName = useMemo(() => {
     const rawName = user?.fullName?.trim();
     return rawName ? rawName.split(/\s+/)[0] : "Driver";
@@ -78,9 +81,15 @@ export function AppHeader({ variant, className }: AppHeaderProps) {
           <button
             type="button"
             aria-label="Notifications"
-            className="flex size-10 items-center justify-center rounded-full text-ink"
+            onClick={openNotifications}
+            className="relative flex size-10 items-center justify-center rounded-full text-ink"
           >
             <Bell className="size-6" />
+            {unreadCount ? (
+              <span className="absolute right-1 top-1 flex min-w-4 items-center justify-center rounded-full bg-[#E84142] px-1 text-[0.62rem] font-bold leading-4 text-white">
+                {unreadCount > 9 ? "9+" : unreadCount}
+              </span>
+            ) : null}
           </button>
         </div>
       </div>

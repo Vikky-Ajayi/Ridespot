@@ -4,11 +4,14 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { useLocationSearchParams } from "@/hooks/useLocationSearchParams";
+import { useNotifications } from "@/hooks/useNotifications";
 import { useStartNavigation } from "@/hooks/useStartNavigation";
 import { getBrowserDriverLocation } from "@/lib/location";
 import { useHotspotStore } from "@/store/hotspot-store";
 import { useModalStore } from "@/store/modal-store";
 import { HotspotDetails } from "@/components/hotspot/HotspotDetails";
+import { NotificationCenter } from "@/components/notifications/NotificationCenter";
+import { NotificationPopup } from "@/components/notifications/NotificationPopup";
 import { LogoutModal } from "@/components/profile/LogoutModal";
 import { SubscriptionModal } from "@/components/profile/SubscriptionModal";
 
@@ -24,6 +27,7 @@ export function AuthenticatedOverlayHost() {
   const openSubscription = useModalStore((state) => state.openSubscription);
   const openLogout = useModalStore((state) => state.openLogout);
   const closeModal = useModalStore((state) => state.closeModal);
+  useNotifications(searchParams.get("preview") !== "app");
 
   useEffect(() => {
     if (searchParams.get("preview") !== "app" || activeModal) {
@@ -59,6 +63,8 @@ export function AuthenticatedOverlayHost() {
       />
 
       <SubscriptionModal open={activeModal === "subscription"} onClose={closeModal} />
+      <NotificationPopup />
+      <NotificationCenter />
 
       <LogoutModal
         open={activeModal === "logout"}

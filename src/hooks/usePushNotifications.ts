@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { notificationRepository } from "@/services/repositories";
+import { useNotificationStore } from "@/store/notification-store";
 
 type PushPermissionState =
   | NotificationPermission
@@ -24,6 +25,7 @@ function hasFirebaseEnv(): boolean {
 
 export function usePushNotifications(enabled = true) {
   const [permissionState, setPermissionState] = useState<PushPermissionState>("idle");
+  const addNotification = useNotificationStore((state) => state.addNotification);
 
   useEffect(() => {
     if (!enabled) {
@@ -48,13 +50,11 @@ export function usePushNotifications(enabled = true) {
       }
 
       const alreadyPrompted = window.localStorage.getItem(promptStorageKey);
-      if (alreadyPrompted) {
-        setPermissionState(Notification.permission);
-        return;
-      }
-
+      const permission =
+        Notification.permission === "default" && !alreadyPrompted
+          ? await Notification.requestPermission()
+          : Notification.permission;
       window.localStorage.setItem(promptStorageKey, "true");
-      const permission = await Notification.requestPermission();
       setPermissionState(permission);
 
       if (permission !== "granted") {
@@ -95,6 +95,23 @@ export function usePushNotifications(enabled = true) {
         if (token) {
           await notificationRepository.registerPushToken({ token });
         }
+
+        messaging.onMessage(messagingInstance, (payload) => {
+          addNotification(
+            {
+              id: crypto.randomUUID(),
+              type: (payload.data?.type as "hotspot_alert" | "coverage_sufficient" | "surge_alert" | "system" | "test") ?? "system",
+              title: payload.notification?.title ?? "RideSpot",
+              body: payload.notification?.body ?? "A new RideSpot alert is available.",
+              wasDelivered: true,
+              wasActedOn: false,
+              isRead: false,
+              sentAt: new Date().toISOString(),
+              data: payload.data ?? {}
+            },
+            { showPopup: true }
+          );
+        });
       } catch {
         setPermissionState("unsupported");
       }
@@ -108,7 +125,7 @@ export function usePushNotifications(enabled = true) {
       cancelled = true;
       globalThis.clearTimeout(timeoutHandle);
     };
-  }, [enabled]);
+  }, [addNotification, enabled]);
 
   return {
     permissionState

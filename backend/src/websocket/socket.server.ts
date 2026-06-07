@@ -44,6 +44,7 @@ export function initSocketServer(server: HttpServer) {
     try {
       socket.data.driver = verifyAuthToken(token);
       socket.join("global");
+      socket.join(`driver:${socket.data.driver.sub}`);
       if (socket.data.driver.country) {
         socket.join(`country:${socket.data.driver.country.toLowerCase()}`);
       }

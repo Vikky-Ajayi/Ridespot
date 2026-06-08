@@ -3,8 +3,14 @@ import { env } from "../config/env.js";
 import { scoreDemand, type DemandLevel } from "../utils/demandScorer.js";
 import type { EventInput } from "../utils/normalise.js";
 
+function normaliseMlBaseUrl(value: string) {
+  return value.replace(/\/health\/?$/i, "").replace(/\/+$/, "");
+}
+
+const mlBaseUrl = normaliseMlBaseUrl(env.ML_SERVICE_URL);
+
 const mlClient = axios.create({
-  baseURL: env.ML_SERVICE_URL,
+  baseURL: mlBaseUrl,
   timeout: 5000
 });
 
@@ -292,12 +298,40 @@ export async function predictDemand(input: PredictionInput): Promise<PredictionR
   }
 }
 
+function getAxiosErrorMessage(error: unknown) {
+  if (axios.isAxiosError(error)) {
+    const status = error.response?.status;
+    const statusText = error.response?.statusText;
+    const detail =
+      typeof error.response?.data === "string"
+        ? error.response.data
+        : JSON.stringify(error.response?.data ?? {});
+
+    if (status) {
+      return `HTTP ${status}${statusText ? ` ${statusText}` : ""}${detail !== "{}" ? `: ${detail}` : ""}`;
+    }
+
+    return error.message;
+  }
+
+  return error instanceof Error ? error.message : "Unknown ML service error";
+}
+
 export async function getModelHealth(): Promise<{
+  serviceReachable: boolean;
+  modelLoaded: boolean;
   loaded: boolean;
   accuracy: number | null;
   operatingAccuracyTarget: number | null;
   operatingConfidenceThreshold: number | null;
+  modelVersion: string | null;
+  lastError: string | null;
+  healthUrl: string;
+  checkedAt: string;
 }> {
+  const checkedAt = new Date().toISOString();
+  const healthUrl = `${mlBaseUrl}/health`;
+
   try {
     const response = await mlClient.get("/health", { timeout: 3000 });
     const data = response.data as {
@@ -313,7 +347,26 @@ export async function getModelHealth(): Promise<{
       throw new Error("ML health response did not match RideSpot schema");
     }
 
+    let modelVersion: string | null = null;
+    try {
+      const metadataResponse = await mlClient.get("/model/metadata", { timeout: 3000 });
+      const metadata = metadataResponse.data as {
+        model_version?: unknown;
+        trained_at?: unknown;
+        model_name?: unknown;
+      };
+      modelVersion =
+        (typeof metadata.model_version === "string" && metadata.model_version) ||
+        (typeof metadata.trained_at === "string" && metadata.trained_at) ||
+        (typeof metadata.model_name === "string" && metadata.model_name) ||
+        null;
+    } catch {
+      modelVersion = null;
+    }
+
     return {
+      serviceReachable: true,
+      modelLoaded: data.model_loaded,
       loaded: data.model_loaded,
       accuracy: data.accuracy,
       operatingAccuracyTarget:
@@ -321,14 +374,24 @@ export async function getModelHealth(): Promise<{
       operatingConfidenceThreshold:
         typeof data.operating_confidence_threshold === "number"
           ? data.operating_confidence_threshold
-          : null
+          : null,
+      modelVersion,
+      lastError: null,
+      healthUrl,
+      checkedAt
     };
-  } catch {
+  } catch (error) {
     return {
+      serviceReachable: false,
+      modelLoaded: false,
       loaded: false,
       accuracy: null,
       operatingAccuracyTarget: null,
-      operatingConfidenceThreshold: null
+      operatingConfidenceThreshold: null,
+      modelVersion: null,
+      lastError: getAxiosErrorMessage(error),
+      healthUrl,
+      checkedAt
     };
   }
 }

@@ -1,5 +1,7 @@
 import Fastify from "fastify";
+import multipart from "@fastify/multipart";
 import jwtPlugin from "./plugins/jwt.js";
+import { env } from "./config/env.js";
 import { registerCors } from "./plugins/cors.js";
 import { registerRateLimit } from "./plugins/rateLimit.js";
 import { registerAuthRoutes } from "./modules/auth/auth.routes.js";
@@ -68,6 +70,12 @@ export async function buildApp() {
 
   await registerCors(app);
   await registerRateLimit(app);
+  await app.register(multipart, {
+    limits: {
+      fileSize: env.ADMIN_OCR_MAX_IMAGE_MB * 1024 * 1024,
+      files: 1
+    }
+  });
   await app.register(jwtPlugin);
 
   app.setErrorHandler((error, request, reply) => {

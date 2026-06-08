@@ -7,6 +7,7 @@ import {
 } from "../../utils/geospatial.js";
 import { AppError } from "../../utils/http.js";
 import type { PlanTier } from "../../utils/jwt.js";
+import { getRouteEstimate, type RouteEstimate } from "../../services/routeEstimate.service.js";
 import { areaRefreshService } from "./areaRefresh.service.js";
 
 interface HotspotRow {
@@ -107,7 +108,7 @@ function normaliseRoutingDecision(value: HotspotRow["routing_decision"]) {
   return value === "go" || value === "avoid" || value === "watch" ? value : "watch";
 }
 
-function mapHotspot(row: HotspotRow) {
+function mapHotspot(row: HotspotRow, routeEstimate?: RouteEstimate) {
   const driversNeeded = Number(row.drivers_needed ?? 1);
   const driversInZone = Number(row.drivers_in_zone ?? 0);
   const isCovered = driversInZone >= driversNeeded;
@@ -124,13 +125,16 @@ function mapHotspot(row: HotspotRow) {
     demandLevel: row.demand_level,
     demandScore: Number(row.demand_score),
     liveScore: row.live_score ?? Math.round(Number(row.demand_score)),
-    driveTimeText: row.drive_time_text ?? "8 min",
+    driveTimeText: routeEstimate?.durationText ?? row.drive_time_text ?? "ETA unavailable",
     distanceText:
+      routeEstimate?.distanceText ??
       row.distance_text ??
-      (typeof row.distance_meters === "number" ? metersToKmText(row.distance_meters) : "5.2 KM"),
+      (typeof row.distance_meters === "number"
+        ? metersToKmText(Number(row.distance_meters))
+        : "Distance unavailable"),
     driverSaturation:
       row.driver_saturation ??
-      normaliseDriverSaturation(Number(row.drivers_in_zone ?? 0), 3),
+      normaliseDriverSaturation(driversInZone, driversNeeded),
     mlConfidence: Number(row.ml_confidence ?? 0),
     predictionMode: row.prediction_mode ?? "conservative-fallback",
     isHighConfidence: Boolean(row.is_high_confidence),
@@ -155,6 +159,33 @@ function mapHotspot(row: HotspotRow) {
     expiresAt: row.expires_at,
     isCovered
   };
+}
+
+async function mapHotspotsWithRouteEstimates(
+  rows: HotspotRow[],
+  origin: { lat: number; lng: number }
+) {
+  const diagnostics = {
+    googleRoutes: 0,
+    estimated: 0
+  };
+
+  const hotspots = await Promise.all(
+    rows.map(async (row) => {
+      const routeEstimate = await getRouteEstimate({
+        originLat: origin.lat,
+        originLng: origin.lng,
+        destinationLat: Number(row.lat),
+        destinationLng: Number(row.lng),
+        country: row.country
+      });
+
+      diagnostics[routeEstimate.provider === "google-routes" ? "googleRoutes" : "estimated"] += 1;
+      return mapHotspot(row, routeEstimate);
+    })
+  );
+
+  return { hotspots, diagnostics };
 }
 
 function buildDemandByHour(liveScore: number) {
@@ -288,14 +319,22 @@ export const hotspotService = {
       })
     );
 
+    const mapped = await mapHotspotsWithRouteEstimates(result.rows, {
+      lat: options.lat,
+      lng: options.lng
+    });
+
     return {
-      hotspots: result.rows.map(mapHotspot),
+      hotspots: mapped.hotspots,
       total: result.rows.length,
       generatedAt: result.rows[0]?.generated_at ?? new Date().toISOString(),
       freshness: delayedForFreePlan ? "delayed" : "realtime",
       refreshing: areaRefresh.refreshing,
       lastRefreshedAt: areaRefresh.lastRefreshedAt,
-      providerDiagnostics: areaRefresh.providerDiagnostics
+      providerDiagnostics: {
+        ...areaRefresh.providerDiagnostics,
+        routeEstimates: mapped.diagnostics
+      }
     };
   },
 
@@ -343,7 +382,7 @@ export const hotspotService = {
       [limit]
     );
 
-    return result.rows.map(mapHotspot);
+    return result.rows.map((row) => mapHotspot(row));
   },
 
   async navigate(driverId: string, hotspotId: string) {

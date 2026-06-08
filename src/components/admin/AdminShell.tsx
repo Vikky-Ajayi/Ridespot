@@ -59,9 +59,9 @@ export function AdminShell({ title, subtitle, children, action }: AdminShellProp
 
   return (
     <main className="min-h-screen bg-[#F4F6F8] text-ink">
-      <div className="flex min-h-screen">
-        <aside className="hidden w-[276px] shrink-0 border-r border-[#E4E7EC] bg-white px-5 py-5 lg:block">
-          <div className="flex h-full flex-col">
+      <div className="min-h-screen">
+        <aside className="fixed inset-y-0 left-0 z-30 hidden w-[276px] border-r border-[#E4E7EC] bg-white px-5 py-5 lg:block">
+          <div className="flex h-full min-h-0 flex-col">
             <div className="flex items-center justify-between">
               <Logo href="/admin/hotspots" />
               <span className="rounded-md bg-brand-soft px-2 py-1 text-xs font-bold text-brand-deep">
@@ -115,7 +115,7 @@ export function AdminShell({ title, subtitle, children, action }: AdminShellProp
           </div>
         </aside>
 
-        <section className="min-w-0 flex-1">
+        <section className="min-w-0 lg:pl-[276px]">
           <header className="sticky top-0 z-20 border-b border-[#E4E7EC] bg-white/95 px-4 py-4 backdrop-blur md:px-8">
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
@@ -128,7 +128,7 @@ export function AdminShell({ title, subtitle, children, action }: AdminShellProp
                 <h1 className="mt-3 text-2xl font-bold md:mt-0">{title}</h1>
                 <p className="mt-1 text-sm font-medium text-[#667085]">{subtitle}</p>
               </div>
-              {action}
+              {action ? <div className="w-full md:w-auto [&>button]:w-full md:[&>button]:w-auto">{action}</div> : null}
             </div>
 
             <div className="mt-4 flex gap-2 overflow-x-auto pb-1 lg:hidden">

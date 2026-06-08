@@ -45,6 +45,9 @@ export default function AdminMlPage() {
 
   const accuracyLabel =
     typeof status?.accuracy === "number" ? `${Math.round(status.accuracy * 10000) / 100}%` : "N/A";
+  const modelLoaded = status?.modelLoaded ?? status?.loaded ?? false;
+  const serviceReachable = status?.serviceReachable ?? modelLoaded;
+  const threshold = status?.operatingAccuracyTarget ?? 0.98;
 
   return (
     <AdminShell
@@ -62,18 +65,24 @@ export default function AdminMlPage() {
         </button>
       }
     >
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <AdminMetricCard
+          label="Service reachable"
+          value={loading ? "..." : serviceReachable ? "Yes" : "No"}
+          icon={Server}
+          tone={serviceReachable ? "success" : "danger"}
+        />
         <AdminMetricCard
           label="Model loaded"
-          value={loading ? "..." : status?.loaded ? "Yes" : "No"}
+          value={loading ? "..." : modelLoaded ? "Yes" : "No"}
           icon={Server}
-          tone={status?.loaded ? "success" : "danger"}
+          tone={modelLoaded ? "success" : "danger"}
         />
         <AdminMetricCard label="Accuracy" value={accuracyLabel} icon={Activity} />
         <AdminMetricCard
           label="Threshold"
-          value={typeof status?.accuracy === "number" && status.accuracy >= 0.85 ? "Met" : "Check"}
-          tone={typeof status?.accuracy === "number" && status.accuracy >= 0.85 ? "success" : "danger"}
+          value={typeof status?.accuracy === "number" && status.accuracy >= threshold ? "Met" : "Check"}
+          tone={typeof status?.accuracy === "number" && status.accuracy >= threshold ? "success" : "danger"}
         />
       </div>
 
@@ -82,6 +91,37 @@ export default function AdminMlPage() {
           {error}
         </div>
       ) : null}
+
+      <section className="mt-6 rounded-lg border border-[#E4E7EC] bg-white p-5">
+        <h2 className="text-sm font-bold">Service diagnostics</h2>
+        <dl className="mt-4 grid gap-3 text-sm md:grid-cols-2">
+          <div className="rounded-lg bg-[#F9FAFB] p-3">
+            <dt className="font-semibold text-[#667085]">Health URL</dt>
+            <dd className="mt-1 break-all font-bold">{status?.healthUrl ?? "N/A"}</dd>
+          </div>
+          <div className="rounded-lg bg-[#F9FAFB] p-3">
+            <dt className="font-semibold text-[#667085]">Model version</dt>
+            <dd className="mt-1 break-all font-bold">{status?.modelVersion ?? "N/A"}</dd>
+          </div>
+          <div className="rounded-lg bg-[#F9FAFB] p-3">
+            <dt className="font-semibold text-[#667085]">Confidence threshold</dt>
+            <dd className="mt-1 font-bold">
+              {typeof status?.operatingConfidenceThreshold === "number"
+                ? status.operatingConfidenceThreshold
+                : "N/A"}
+            </dd>
+          </div>
+          <div className="rounded-lg bg-[#F9FAFB] p-3">
+            <dt className="font-semibold text-[#667085]">Checked at</dt>
+            <dd className="mt-1 font-bold">{status?.checkedAt ?? "N/A"}</dd>
+          </div>
+        </dl>
+        {status?.lastError ? (
+          <div className="mt-4 rounded-lg border border-danger-soft bg-danger-soft p-4 text-sm font-semibold text-danger">
+            {status.lastError}
+          </div>
+        ) : null}
+      </section>
 
       <section className="mt-6 rounded-lg border border-[#E4E7EC] bg-white p-5">
         <h2 className="text-sm font-bold">Retraining result</h2>

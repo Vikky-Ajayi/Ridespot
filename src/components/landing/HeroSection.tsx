@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import { PwaInstallButton } from "@/components/landing/PwaInstallButton";
 
 function HeroReviewBlock({ className = "" }: { className?: string }) {
   return (
@@ -82,6 +83,7 @@ export function HeroSection() {
               >
                 Start Driving Smarter Now - Free
               </Link>
+              <PwaInstallButton />
               <Link
                 href="/login"
                 className="inline-flex min-h-[3.8rem] items-center justify-center rounded-[0.85rem] bg-[#eef0f4] px-6 text-[1rem] font-semibold text-ink transition hover:bg-[#e3e6eb] lg:min-h-[3rem] lg:min-w-[92px] lg:px-5 lg:text-[0.95rem]"

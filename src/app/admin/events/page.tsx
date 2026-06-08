@@ -7,7 +7,8 @@ import { MARKET_COUNTRIES } from "@/lib/markets";
 import {
   adminRepository,
   type AdminEvent,
-  type AdminEventInput
+  type AdminEventInput,
+  type EventOcrResult
 } from "@/services/repositories/admin.repository";
 
 const emptyForm = {
@@ -53,6 +54,8 @@ export default function AdminEventsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [ocrResult, setOcrResult] = useState<EventOcrResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function loadEvents() {
@@ -102,6 +105,45 @@ export default function AdminEventsPage() {
   function resetForm() {
     setEditingId(null);
     setForm(emptyForm);
+    setOcrResult(null);
+  }
+
+  async function extractFlyer(file: File | null) {
+    if (!file) {
+      return;
+    }
+
+    setOcrLoading(true);
+    setError(null);
+
+    try {
+      const result = await adminRepository.extractEventFromFlyer(file);
+      setOcrResult(result);
+      const extracted = result.extractedEvent;
+
+      setForm((current) => ({
+        ...current,
+        name: extracted.name ?? current.name,
+        venueName: extracted.venueName ?? current.venueName,
+        address: extracted.address ?? current.address,
+        city: extracted.city ?? current.city,
+        country: extracted.country ?? current.country,
+        lat: typeof extracted.lat === "number" ? String(extracted.lat) : current.lat,
+        lng: typeof extracted.lng === "number" ? String(extracted.lng) : current.lng,
+        startTime: extracted.startTime ? toLocalDateTimeInput(extracted.startTime) : current.startTime,
+        endTime: extracted.endTime ? toLocalDateTimeInput(extracted.endTime) : current.endTime,
+        expectedAttendance:
+          typeof extracted.expectedAttendance === "number"
+            ? String(extracted.expectedAttendance)
+            : current.expectedAttendance,
+        eventType: extracted.eventType ?? current.eventType,
+        eventCategory: extracted.eventCategory ?? current.eventCategory
+      }));
+    } catch {
+      setError("Unable to extract event details from flyer. Check OCR env keys and image quality.");
+    } finally {
+      setOcrLoading(false);
+    }
   }
 
   async function submitEvent(event: FormEvent<HTMLFormElement>) {
@@ -164,6 +206,52 @@ export default function AdminEventsPage() {
         <section className="rounded-lg border border-[#E4E7EC] bg-white p-4">
           <h2 className="text-sm font-bold">{editingId ? "Edit event" : "Create manual event"}</h2>
           {error ? <p className="mt-3 text-sm font-semibold text-danger">{error}</p> : null}
+
+          <div className="mt-4 rounded-xl border border-dashed border-[#D0D5DD] bg-[#F9FAFB] p-4">
+            <p className="text-sm font-bold">Extract from flyer</p>
+            <p className="mt-1 text-xs font-semibold leading-5 text-[#667085]">
+              Upload an event flyer. OCR fills this form, then you review and save manually.
+            </p>
+            <label className="mt-3 inline-flex h-10 w-full cursor-pointer items-center justify-center rounded-lg bg-ink px-4 text-sm font-bold text-white">
+              {ocrLoading ? "Extracting..." : "Upload flyer image"}
+              <input
+                type="file"
+                accept="image/*"
+                className="sr-only"
+                disabled={ocrLoading}
+                onChange={(event) => {
+                  void extractFlyer(event.target.files?.[0] ?? null);
+                  event.currentTarget.value = "";
+                }}
+              />
+            </label>
+
+            {ocrResult ? (
+              <div className="mt-4 space-y-3">
+                <div className="rounded-lg bg-white p-3 ring-1 ring-[#E4E7EC]">
+                  <p className="text-xs font-bold uppercase tracking-[0.08em] text-[#667085]">
+                    Extraction confidence
+                  </p>
+                  <p className="mt-1 text-lg font-bold">
+                    {Math.round(ocrResult.confidence * 100)}%
+                  </p>
+                </div>
+                {ocrResult.missingFields.length > 0 ? (
+                  <div className="rounded-lg bg-[#FFF7ED] p-3 text-xs font-semibold text-[#B54708]">
+                    Missing fields: {ocrResult.missingFields.join(", ")}
+                  </div>
+                ) : null}
+                <details className="rounded-lg bg-white p-3 ring-1 ring-[#E4E7EC]">
+                  <summary className="cursor-pointer text-xs font-bold text-[#344054]">
+                    View raw OCR text
+                  </summary>
+                  <pre className="mt-3 max-h-44 overflow-auto whitespace-pre-wrap text-xs leading-5 text-[#667085]">
+                    {ocrResult.rawText}
+                  </pre>
+                </details>
+              </div>
+            ) : null}
+          </div>
 
           <form onSubmit={submitEvent} className="mt-4 space-y-3">
             {[
@@ -296,7 +384,8 @@ export default function AdminEventsPage() {
               />
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <>
+            <div className="hidden overflow-x-auto md:block">
               <table className="w-full min-w-[860px] text-left">
                 <thead className="bg-[#F9FAFB] text-xs font-bold uppercase text-[#667085]">
                   <tr>
@@ -354,6 +443,49 @@ export default function AdminEventsPage() {
                 </tbody>
               </table>
             </div>
+            <div className="divide-y divide-[#E4E7EC] md:hidden">
+              {events.map((event) => (
+                <article key={event.id} className="p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold">{event.name}</p>
+                      <p className="mt-1 text-xs font-semibold text-[#667085]">
+                        {event.venueName ?? "No venue"}
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded-md bg-[#F2F4F7] px-2 py-1 text-[10px] font-bold uppercase text-[#344054]">
+                      {event.source}
+                    </span>
+                  </div>
+                  <div className="mt-3 grid gap-2 text-xs font-semibold text-[#344054]">
+                    <p>
+                      Market: {event.city}, {event.country}
+                    </p>
+                    <p>Attendance: {event.expectedAttendance ?? 0}</p>
+                    <p>Start: {formatEventTime(event.startTime)}</p>
+                  </div>
+                  <div className="mt-4 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => startEditing(event)}
+                      className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-lg border border-[#D0D5DD] bg-white text-xs font-bold"
+                    >
+                      <Pencil className="size-4" />
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void deleteEvent(event.id)}
+                      className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-lg border border-danger-soft bg-danger-soft text-xs font-bold text-danger"
+                    >
+                      <Trash2 className="size-4" />
+                      Delete
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+            </>
           )}
         </section>
       </div>

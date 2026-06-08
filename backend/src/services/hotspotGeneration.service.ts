@@ -114,7 +114,7 @@ export async function upsertGeneratedHotspots(hotspots: GeneratedHotspot[]) {
            active_time_start, active_time_end, event_id, is_active, generated_at, expires_at
          ) VALUES (
            $1, $2, ST_SetSRID(ST_MakePoint($4, $3), 4326)::geography, $5, $6, $7, $8,
-           '8 min', '5.2 KM', $9, $10, $11, $12, $13, $14, $15, $16,
+           NULL, NULL, $9, $10, $11, $12, $13, $14, $15, $16,
            $17, $18, $19, $20, $21, TRUE, NOW(), $22
          )
          ON CONFLICT (event_id) WHERE event_id IS NOT NULL DO UPDATE SET
@@ -125,6 +125,8 @@ export async function upsertGeneratedHotspots(hotspots: GeneratedHotspot[]) {
            demand_level = EXCLUDED.demand_level,
            demand_score = EXCLUDED.demand_score,
            live_score = EXCLUDED.live_score,
+           drive_time_text = EXCLUDED.drive_time_text,
+           distance_text = EXCLUDED.distance_text,
            driver_saturation = EXCLUDED.driver_saturation,
            ml_confidence = EXCLUDED.ml_confidence,
            prediction_mode = EXCLUDED.prediction_mode,
@@ -181,7 +183,7 @@ export async function upsertGeneratedHotspots(hotspots: GeneratedHotspot[]) {
            generated_at
          ) VALUES (
            $1, $2, $3, $4, ST_SetSRID(ST_MakePoint($6, $5), 4326)::geography, $7,
-           $8, $9, $10, '8 min', '5.2 KM',
+           $8, $9, $10, NULL, NULL,
            $11, $12, $13, $14,
            $15, $16, $17,
            $18, $19, $20, $21, $22,
@@ -243,7 +245,7 @@ export async function generateHotspotsFromEvents(events: ActiveEventRow[]) {
     hotspots.push({
       eventId: event.id,
       name: event.venue_name ?? event.name,
-      postcode: "N5 1BU",
+      postcode: null,
       city: event.city,
       country: event.country,
       lat: event.lat,

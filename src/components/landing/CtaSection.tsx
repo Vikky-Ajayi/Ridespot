@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PwaInstallButton } from "@/components/landing/PwaInstallButton";
 
 export function CtaSection() {
   return (
@@ -15,13 +16,14 @@ export function CtaSection() {
           Join 12,000+ drivers who use RideSpot to position smarter, catch surges
           faster, and take home more at the end of every shift.
         </p>
-        <div className="mt-8 flex justify-center">
+        <div className="mt-8 flex flex-col items-center justify-center gap-3 md:flex-row">
           <Link
             href="/register"
             className="inline-flex min-h-14 w-full items-center justify-center rounded-2xl bg-ink px-6 text-base font-semibold text-white transition duration-200 hover:bg-ink-soft md:w-auto md:min-w-[28rem]"
           >
             Get Started for Free
           </Link>
+          <PwaInstallButton variant="light" className="w-full md:w-auto" />
         </div>
         <p className="mt-3 text-sm font-medium text-ink/72">
           No credit card required · Cancel anytime

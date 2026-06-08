@@ -70,8 +70,16 @@ export interface NotificationLog {
 }
 
 export interface MlStatus {
+  serviceReachable: boolean;
+  modelLoaded: boolean;
   loaded: boolean;
   accuracy: number | null;
+  operatingAccuracyTarget: number | null;
+  operatingConfidenceThreshold: number | null;
+  modelVersion: string | null;
+  lastError: string | null;
+  healthUrl: string;
+  checkedAt: string;
 }
 
 export interface AdminEventInput {
@@ -97,6 +105,31 @@ export interface AdminEvent extends AdminEventInput {
     lat: number;
     lng: number;
   };
+}
+
+export interface OcrExtractedEvent {
+  name: string | null;
+  venueName: string | null;
+  address: string | null;
+  city: string | null;
+  country: string | null;
+  lat: number | null;
+  lng: number | null;
+  startTime: string | null;
+  endTime: string | null;
+  expectedAttendance: number | null;
+  eventType: string | null;
+  eventCategory: string | null;
+  confidence: number;
+  missingFields: string[];
+}
+
+export interface EventOcrResult {
+  extractedEvent: OcrExtractedEvent;
+  confidence: number;
+  missingFields: string[];
+  rawText: string;
+  providerDiagnostics: Record<string, unknown>;
 }
 
 export const adminRepository = {
@@ -152,6 +185,13 @@ export const adminRepository = {
   async createEvent(input: AdminEventInput) {
     const response = await adminApi.post("/api/admin/events", input);
     return unwrapAdminData<{ id: string }>(response);
+  },
+
+  async extractEventFromFlyer(file: File) {
+    const data = new FormData();
+    data.append("file", file);
+    const response = await adminApi.post("/api/admin/events/ocr", data);
+    return unwrapAdminData<EventOcrResult>(response);
   },
 
   async updateEvent(id: string, input: AdminEventInput) {

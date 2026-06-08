@@ -44,6 +44,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
   app.post("/ml/retrain", { preHandler: adminMiddleware }, adminController.triggerMlRetrain);
 
   app.get("/events", { preHandler: adminMiddleware }, adminController.listEvents);
+  app.post("/events/ocr", { preHandler: adminMiddleware }, adminController.extractEventOcr);
   app.post("/events", { preHandler: adminMiddleware }, adminController.createEvent);
   app.put<{ Params: { id: string } }>(
     "/events/:id",

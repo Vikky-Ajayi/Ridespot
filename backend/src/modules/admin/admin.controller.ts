@@ -1,6 +1,8 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { sendSuccess } from "../../utils/http.js";
+import type { MultipartFile } from "@fastify/multipart";
+import { AppError, sendSuccess } from "../../utils/http.js";
 import { signAdminToken } from "../../utils/adminJwt.js";
+import { extractEventFromFlyer } from "../../services/eventOcr.service.js";
 import { adminEventCreateSchema, adminEventUpdateSchema, adminLoginSchema, listQuerySchema, updateMarketConfigSchema } from "./admin.schema.js";
 import { adminService } from "./admin.service.js";
 
@@ -71,6 +73,29 @@ export const adminController = {
     const body = adminEventCreateSchema.parse(request.body);
     const event = await adminService.createEvent(body);
     return sendSuccess(reply, event, { statusCode: 201 });
+  },
+
+  async extractEventOcr(request: FastifyRequest, reply: FastifyReply) {
+    const file = await (
+      request as FastifyRequest & { file: () => Promise<MultipartFile | undefined> }
+    ).file();
+
+    if (!file) {
+      throw new AppError(400, "VALIDATION_ERROR", "Upload a flyer image file.");
+    }
+
+    if (!file.mimetype.startsWith("image/")) {
+      throw new AppError(400, "VALIDATION_ERROR", "OCR upload must be an image file.");
+    }
+
+    const buffer = await file.toBuffer();
+    const extracted = await extractEventFromFlyer({
+      buffer,
+      filename: file.filename,
+      mimetype: file.mimetype
+    });
+
+    return sendSuccess(reply, extracted);
   },
 
   async updateEvent(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {

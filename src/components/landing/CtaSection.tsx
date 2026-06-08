@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { PwaInstallButton } from "@/components/landing/PwaInstallButton";
 
 export function CtaSection() {
   return (
@@ -23,7 +22,6 @@ export function CtaSection() {
           >
             Get Started for Free
           </Link>
-          <PwaInstallButton variant="light" className="w-full md:w-auto" />
         </div>
         <p className="mt-3 text-sm font-medium text-ink/72">
           No credit card required · Cancel anytime

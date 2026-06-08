@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Menu, X } from "lucide-react";
 import { useId, useState } from "react";
+import { PwaInstallButton } from "@/components/landing/PwaInstallButton";
 import { PublicMobileNavigation } from "@/components/layout/PublicMobileNavigation";
 import { Logo } from "@/components/layout/Logo";
 import { MobileSidebar } from "@/components/ui/MobileSidebar";
@@ -29,6 +30,7 @@ export function Navbar({ className, items }: NavbarProps) {
               {item.label}
             </Link>
           ))}
+          <PwaInstallButton />
           <Link
             href={publicNavCta.href}
             className="inline-flex min-h-12 min-w-32 items-center justify-center rounded-2xl bg-ink px-5 text-base font-semibold text-white transition duration-200 hover:bg-ink-soft"

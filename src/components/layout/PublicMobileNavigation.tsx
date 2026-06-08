@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { PwaInstallButton } from "@/components/landing/PwaInstallButton";
 import { publicNavCta, publicNavItems } from "@/data/public-nav";
 
 export interface PublicMobileNavigationProps {
@@ -21,6 +22,7 @@ export function PublicMobileNavigation({ onNavigate }: PublicMobileNavigationPro
             {item.label}
           </Link>
         ))}
+        <PwaInstallButton placement="mobile-menu" />
       </div>
       <Link
         href={publicNavCta.href}

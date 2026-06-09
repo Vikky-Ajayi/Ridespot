@@ -402,7 +402,9 @@ export default function AdminEventsPage() {
                     <tr key={event.id}>
                       <td className="px-4 py-3">
                         <p className="text-sm font-bold">{event.name}</p>
-                        <p className="text-xs font-medium text-[#667085]">{event.venueName ?? "No venue"}</p>
+                        <p className="text-xs font-medium text-[#667085]">
+                          {event.venueName ?? event.address ?? "Venue pending"}
+                        </p>
                       </td>
                       <td className="px-4 py-3 text-sm font-semibold">
                         {event.city}, {event.country}
@@ -450,7 +452,7 @@ export default function AdminEventsPage() {
                     <div className="min-w-0">
                       <p className="text-sm font-bold">{event.name}</p>
                       <p className="mt-1 text-xs font-semibold text-[#667085]">
-                        {event.venueName ?? "No venue"}
+                        {event.venueName ?? event.address ?? "Venue pending"}
                       </p>
                     </div>
                     <span className="shrink-0 rounded-md bg-[#F2F4F7] px-2 py-1 text-[10px] font-bold uppercase text-[#344054]">

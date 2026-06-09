@@ -392,6 +392,7 @@ export const adminService = {
          ${selectLatLng("location")},
          is_active
        FROM events
+       WHERE is_active = TRUE
        ORDER BY start_time DESC
        LIMIT $1`,
       [limit]
@@ -520,7 +521,8 @@ export const adminService = {
 
   async deleteEvent(id: string) {
     const result = await query<{ id: string }>(
-      `DELETE FROM events
+      `UPDATE events
+       SET is_active = FALSE
        WHERE id = $1
        RETURNING id`,
       [id]

@@ -38,7 +38,39 @@ export interface ActiveEventRow {
   lng: number;
 }
 
-async function upsertEvent(client: PoolClient, event: EventInput) {
+function isValidDate(value: Date | null | undefined): value is Date {
+  return value instanceof Date && !Number.isNaN(value.getTime());
+}
+
+function prepareEventForStorage(event: EventInput): EventInput | null {
+  if (!Number.isFinite(event.lat) || !Number.isFinite(event.lng)) {
+    return null;
+  }
+
+  if (!isValidDate(event.startTime)) {
+    return null;
+  }
+
+  const address = event.address?.trim() || null;
+  const venueName = event.venueName?.trim() || address?.split(",")[0]?.trim() || null;
+  if (!venueName && !address) {
+    return null;
+  }
+
+  return {
+    ...event,
+    venueName,
+    address,
+    endTime: isValidDate(event.endTime) ? event.endTime : null
+  };
+}
+
+async function upsertEvent(client: PoolClient, input: EventInput) {
+  const event = prepareEventForStorage(input);
+  if (!event) {
+    return false;
+  }
+
   await client.query(
     `INSERT INTO events (
       external_id, source, name, venue_name, location, address, city, country,
@@ -79,6 +111,8 @@ async function upsertEvent(client: PoolClient, event: EventInput) {
       JSON.stringify(event.rawData)
     ]
   );
+
+  return true;
 }
 
 export const eventsService = {
@@ -127,14 +161,22 @@ export const eventsService = {
       )
     ).flat();
 
+    let persistedEvents = 0;
+    let rejectedBeforePersist = 0;
+
     await withTransaction(async (client) => {
       for (const event of allEvents) {
-        await upsertEvent(client, event);
+        if (await upsertEvent(client, event)) {
+          persistedEvents += 1;
+        } else {
+          rejectedBeforePersist += 1;
+        }
       }
     });
 
     return {
-      total: allEvents.length,
+      total: persistedEvents,
+      rejectedBeforePersist,
       errors: ingestionErrors,
       eventbriteDiagnostics
     };
@@ -178,9 +220,16 @@ export const eventsService = {
 
     const allEvents = [...ticketmasterEvents, ...eventbriteEvents, ...googlePlaceEvents];
 
+    let persistedEvents = 0;
+    let rejectedBeforePersist = 0;
+
     await withTransaction(async (client) => {
       for (const event of allEvents) {
-        await upsertEvent(client, event);
+        if (await upsertEvent(client, event)) {
+          persistedEvents += 1;
+        } else {
+          rejectedBeforePersist += 1;
+        }
       }
     });
 
@@ -193,7 +242,8 @@ export const eventsService = {
         ticketmasterEvents: ticketmasterEvents.length,
         eventbriteEvents: eventbriteEvents.length,
         googlePlaceEvents: googlePlaceEvents.length,
-        totalEvents: allEvents.length,
+        totalEvents: persistedEvents,
+        rejectedBeforePersist,
         errorCount: ingestionErrors.length,
         eventbriteRejectedEvents: eventbriteDiagnostics.reduce(
           (total, item) => total + item.rejected,
@@ -208,7 +258,8 @@ export const eventsService = {
     );
 
     return {
-      total: allEvents.length,
+      total: persistedEvents,
+      rejectedBeforePersist,
       ticketmasterEvents: ticketmasterEvents.length,
       eventbriteEvents: eventbriteEvents.length,
       googlePlaceEvents: googlePlaceEvents.length,

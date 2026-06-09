@@ -142,6 +142,16 @@ def generate_insight(demand_level: str, city: str, score: float) -> str:
     return insights.get(demand_level, f"Demand score: {score:.0f}/100")
 
 
+@app.get("/")
+async def root() -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "service": "ridespot-ml",
+        "model_loaded": registry.model is not None,
+        "accuracy": registry.metadata.get("accuracy") if registry.metadata else None,
+    }
+
+
 @app.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     return HealthResponse(

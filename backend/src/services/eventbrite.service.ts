@@ -376,6 +376,69 @@ function estimateAttendance(eventName: string, category: string | null) {
   return 500;
 }
 
+function firstNonEmpty(...values: unknown[]) {
+  for (const value of values) {
+    const text = asString(value);
+    if (text) return text;
+  }
+  return null;
+}
+
+function asRecordArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.map(asRecord).filter((item): item is Record<string, unknown> => Boolean(item))
+    : [];
+}
+
+function addressRecordToString(value: unknown) {
+  const record = asRecord(value);
+  if (!record) return null;
+  const parts = [
+    record.street_address,
+    record.streetAddress,
+    record.address,
+    record.locality,
+    record.city,
+    record.region,
+    record.postcode,
+    record.postalCode,
+    record.country
+  ]
+    .map(asString)
+    .filter((part): part is string => Boolean(part));
+  return parts.length > 0 ? Array.from(new Set(parts)).join(", ") : null;
+}
+
+function derivePredictHqVenue(raw: Record<string, unknown>) {
+  const entities = asRecordArray(raw.entities);
+  const venueEntity =
+    entities.find((entity) => {
+      const type = firstNonEmpty(entity.type, entity.category);
+      return type
+        ? /venue|place|location/i.test(type)
+        : Boolean(firstNonEmpty(entity.name, entity.label) && firstNonEmpty(entity.formatted_address, entity.address));
+    }) ?? null;
+
+  const address = firstNonEmpty(
+    venueEntity?.formatted_address,
+    venueEntity?.formattedAddress,
+    addressRecordToString(venueEntity?.address),
+    raw.formatted_address,
+    raw.formattedAddress,
+    addressRecordToString(raw.address)
+  );
+  const venueName = firstNonEmpty(
+    venueEntity?.name,
+    venueEntity?.label,
+    venueEntity?.title,
+    raw.venue_name,
+    raw.venue,
+    address?.split(",")[0]
+  );
+
+  return { venueName, address };
+}
+
 async function normaliseJsonLdEvent(
   raw: Record<string, unknown>,
   input: EventSourceFetchInput,
@@ -433,6 +496,11 @@ async function normaliseJsonLdEvent(
       ? parsedEndTime
       : estimateEndTime(startTime, name, category);
   const eventUrl = url ?? `${name}:${startDate}:${address ?? venueName ?? ""}`;
+  const storedAddress = geocodedMarket.formattedAddress ?? address;
+  const storedVenueName = venueName ?? storedAddress?.split(",")[0]?.trim() ?? null;
+  if (!storedVenueName && !storedAddress) {
+    return { event: null, geocoded, rejectedReason: "missing_venue" };
+  }
 
   return {
     geocoded,
@@ -440,10 +508,10 @@ async function normaliseJsonLdEvent(
       externalId: `eventbrite-public:${stableHash(eventUrl)}`,
       source: "eventbrite",
       name,
-      venueName,
+      venueName: storedVenueName,
       lat: coordinates.lat,
       lng: coordinates.lng,
-      address: geocodedMarket.formattedAddress ?? address,
+      address: storedAddress,
       city: geocodedMarket.city ?? context.city,
       country: canonicalMarketCountry(geocodedMarket.country ?? context.country) ?? context.country,
       startTime,
@@ -646,21 +714,30 @@ async function fetchAggregatorEventsNear(input: EventSourceFetchInput): Promise<
         return null;
       }
 
+      const { venueName, address } = derivePredictHqVenue(raw);
+      if (!venueName && !address) {
+        return null;
+      }
+
       const endRaw = asString(raw.end);
-      const endTime = endRaw ? new Date(endRaw) : estimateEndTime(startTime, title, asString(raw.category));
+      const parsedEndTime = endRaw ? new Date(endRaw) : null;
+      const endTime =
+        parsedEndTime && !Number.isNaN(parsedEndTime.getTime())
+          ? parsedEndTime
+          : estimateEndTime(startTime, title, asString(raw.category));
 
       const event: EventInput = {
         externalId: `aggregator:${provider}:${asString(raw.id) ?? stableHash(`${title}:${start}`)}`,
         source: "event_aggregator",
         name: title,
-        venueName: null,
+        venueName: venueName ?? address,
         lat,
         lng,
-        address: null,
+        address,
         city: market.city,
         country: market.country,
         startTime,
-        endTime: Number.isNaN(endTime.getTime()) ? null : endTime,
+        endTime,
         expectedAttendance: typeof raw.rank === "number" ? Math.max(100, Number(raw.rank) * 20) : null,
         eventType: "Public Event",
         eventCategory: asString(raw.category),

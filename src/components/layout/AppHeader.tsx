@@ -40,7 +40,7 @@ export function AppHeader({ variant, className }: AppHeaderProps) {
   }, [user?.fullName]);
 
   return (
-    <header className={cn("bg-white px-4 pb-4 pt-4", className)}>
+    <header className={cn("bg-white px-4 pb-4 pwa-safe-top", className)}>
       <div
         className={cn(
           "flex justify-between gap-3",

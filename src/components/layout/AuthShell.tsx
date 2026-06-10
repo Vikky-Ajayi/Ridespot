@@ -33,7 +33,7 @@ export function AuthShell({ children, footer, className, formProps }: AuthShellP
 
   return (
     <DeviceShell className={cn("overflow-hidden", className)}>
-      <header className="border-b border-line px-4 py-4">
+      <header className="border-b border-line px-4 pb-4 pwa-safe-top">
         <div className="flex items-center justify-between">
           <Logo />
           <button

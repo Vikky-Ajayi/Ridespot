@@ -47,7 +47,7 @@ export default function ChangePasswordPage() {
 
   return (
     <DesktopShell className="bg-white">
-      <div className="flex h-full min-h-0 flex-col overflow-y-auto bg-white px-4 pb-6 pt-4">
+      <div className="flex h-full min-h-0 flex-col overflow-y-auto bg-white px-4 pb-6 pwa-safe-top">
         <div className="flex items-center gap-4">
           <button
             type="button"

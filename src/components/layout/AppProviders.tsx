@@ -4,6 +4,7 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { Toast } from "@/components/ui/Toast";
 import { useLocationSearchParams } from "@/hooks/useLocationSearchParams";
 import { useToast } from "@/hooks/useToast";
+import { PwaDisplayMode } from "./PwaDisplayMode";
 
 export interface AppProvidersProps {
   children: ReactNode;
@@ -103,6 +104,7 @@ export function AppProviders({ children }: AppProvidersProps) {
 
   return (
     <>
+      <PwaDisplayMode />
       {children}
       <Toast toast={toast} />
     </>

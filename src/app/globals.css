@@ -6,6 +6,36 @@
   color-scheme: light;
   --background: #ffffff;
   --foreground: #090909;
+  --ridespot-safe-top: 0px;
+  --ridespot-safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+@media (max-width: 767px) {
+  html[data-ridespot-standalone="true"] {
+    --ridespot-safe-top: env(safe-area-inset-top, 10px);
+  }
+}
+
+@media (max-width: 767px) and (display-mode: standalone),
+  (max-width: 767px) and (display-mode: fullscreen) {
+  :root {
+    --ridespot-safe-top: env(safe-area-inset-top, 10px);
+  }
+}
+
+@supports (padding-top: max(0px, 0px)) {
+  @media (max-width: 767px) {
+    html[data-ridespot-standalone="true"] {
+      --ridespot-safe-top: max(env(safe-area-inset-top, 0px), 10px);
+    }
+  }
+
+  @media (max-width: 767px) and (display-mode: standalone),
+    (max-width: 767px) and (display-mode: fullscreen) {
+    :root {
+      --ridespot-safe-top: max(env(safe-area-inset-top, 0px), 10px);
+    }
+  }
 }
 
 * {
@@ -65,8 +95,16 @@ img {
 
 .screen-container {
   width: min(100%, 390px);
-  min-height: 100vh;
+  min-height: 100dvh;
   background: #ffffff;
+}
+
+.pwa-safe-top {
+  padding-top: calc(1rem + var(--ridespot-safe-top));
+}
+
+.pwa-safe-top-tight {
+  padding-top: calc(0.75rem + var(--ridespot-safe-top));
 }
 
 .ridespot-phone-input .form-control {

@@ -116,7 +116,7 @@ export function AdminShell({ title, subtitle, children, action }: AdminShellProp
         </aside>
 
         <section className="min-w-0 lg:pl-[276px]">
-          <header className="sticky top-0 z-20 border-b border-[#E4E7EC] bg-white/95 px-4 py-4 backdrop-blur md:px-8">
+          <header className="sticky top-0 z-20 border-b border-[#E4E7EC] bg-white/95 px-4 pb-4 pwa-safe-top backdrop-blur md:px-8">
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
                 <div className="flex items-center gap-2 lg:hidden">

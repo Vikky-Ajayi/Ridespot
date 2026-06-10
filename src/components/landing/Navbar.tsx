@@ -21,8 +21,8 @@ export function Navbar({ className, items }: NavbarProps) {
   const navItems = items ?? publicNavItems;
 
   return (
-    <header className={cn("border-b border-line bg-white", className)}>
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4 md:px-6 lg:px-[14px]">
+    <header className={cn("border-b border-line bg-white pwa-safe-top", className)}>
+      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 pb-4 pt-0 md:px-6 lg:px-[14px]">
         <Logo />
         <nav className="hidden items-center gap-10 text-sm text-ink-muted md:flex">
           {navItems.map((item) => (

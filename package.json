@@ -13,6 +13,7 @@
     "backend:start:detached": "npm --prefix backend run start:detached",
     "ml:health": "node scripts/check-ml-health.mjs 8010 127.0.0.1 30000",
     "ml:smoke": "python ml-service/scripts/smoke_service.py",
+    "ml:smoke:remote": "python ml-service/scripts/smoke_remote.py",
     "ml:proxy:sample": "python ml-service/scripts/build_proxy_outcomes.py --limit 1000 --timeout 20 --allow-fixture",
     "ml:proxy:experiment": "python ml-service/scripts/run_proxy_experiment.py --max-rows 6000 --no-promote",
     "ml:operating-policy": "python ml-service/scripts/evaluate_operating_policy.py --target-accuracy 0.98",

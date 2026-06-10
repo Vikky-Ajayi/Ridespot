@@ -68,6 +68,17 @@ function isValidCoordinate(value: number) {
   return Number.isFinite(value) && value !== 0;
 }
 
+function isGoogleMapsErrorElement(element: HTMLElement) {
+  const text = element.innerText.toLowerCase();
+
+  return (
+    text.includes("this page can't load google maps correctly") ||
+    text.includes("this page didn't load google maps correctly") ||
+    text.includes("oops! something went wrong") ||
+    Boolean(element.querySelector(".gm-err-container, .gm-err-content, img[src*='icon_error']"))
+  );
+}
+
 function toLatLngLiteral(location: DriverLocation): google.maps.LatLngLiteral {
   return {
     lat: location.lat,
@@ -358,20 +369,19 @@ export function MapContainer({
     let idleListener: google.maps.MapsEventListener | null = null;
     let boundsListener: google.maps.MapsEventListener | null = null;
     let authCheckTimer: number | null = null;
+    let authFailureObserver: MutationObserver | null = null;
 
     const useTileFallback = () => {
+      overlayRef.current?.setMap(null);
+      overlayRef.current = null;
+      mapRef.current = null;
       setMapProvider("osm");
       setMapStatus("ready");
     };
 
     const hasGoogleAuthError = () =>
       Boolean(window.__ridespotGoogleMapsAuthFailed) ||
-      Boolean(
-        mapElementRef.current &&
-          (mapElementRef.current.innerText.includes("This page didn't load Google Maps correctly") ||
-            mapElementRef.current.innerText.includes("Oops! Something went wrong.") ||
-            mapElementRef.current.querySelector('img[src*="icon_error"]'))
-      );
+      Boolean(mapElementRef.current && isGoogleMapsErrorElement(mapElementRef.current));
 
     const handleGoogleAuthFailure = () => {
       if (!cancelled) {
@@ -461,6 +471,19 @@ export function MapContainer({
 
     window.addEventListener("ridespot:google-maps-auth-failure", handleGoogleAuthFailure);
 
+    if (mapElementRef.current) {
+      authFailureObserver = new MutationObserver(() => {
+        if (!cancelled && hasGoogleAuthError()) {
+          useTileFallback();
+        }
+      });
+      authFailureObserver.observe(mapElementRef.current, {
+        childList: true,
+        subtree: true,
+        characterData: true
+      });
+    }
+
     loadGooglePlaces()
       .then(() => {
         if (cancelled || !mapElementRef.current) {
@@ -522,6 +545,7 @@ export function MapContainer({
     return () => {
       cancelled = true;
       window.removeEventListener("ridespot:google-maps-auth-failure", handleGoogleAuthFailure);
+      authFailureObserver?.disconnect();
       idleListener?.remove();
       boundsListener?.remove();
       if (authCheckTimer) {

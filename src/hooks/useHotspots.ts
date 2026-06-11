@@ -34,6 +34,7 @@ export function useHotspots(filter: "all" | Exclude<DemandLevel, "very-high"> = 
   const hotspots = useHotspotStore((state) => state.hotspots);
   const generatedAt = useHotspotStore((state) => state.generatedAt);
   const isStale = useHotspotStore((state) => state.isStale);
+  const metadata = useHotspotStore((state) => state.metadata);
   const setHotspots = useHotspotStore((state) => state.setHotspots);
   const addOrUpdateHotspot = useHotspotStore((state) => state.addOrUpdateHotspot);
   const markZoneCovered = useHotspotStore((state) => state.markZoneCovered);
@@ -56,7 +57,7 @@ export function useHotspots(filter: "all" | Exclude<DemandLevel, "very-high"> = 
           return;
         }
 
-        setHotspots(response.hotspots, response.generatedAt);
+        setHotspots(response.hotspots, response.generatedAt, false, response.metadata);
         cacheHotspots(response.hotspots);
         setLoading(false);
       })
@@ -67,9 +68,9 @@ export function useHotspots(filter: "all" | Exclude<DemandLevel, "very-high"> = 
 
         const cached = getCachedHotspots();
         if (cached.length) {
-          setHotspots(cached, null, true);
+          setHotspots(cached, null, true, null);
         } else {
-          setHotspots([], null, true);
+          setHotspots([], null, true, null);
         }
         setLoading(false);
       });
@@ -141,6 +142,7 @@ export function useHotspots(filter: "all" | Exclude<DemandLevel, "very-high"> = 
     allHotspots: hotspots,
     generatedAt,
     isStale,
+    metadata,
     loading,
     position,
     refreshPosition,

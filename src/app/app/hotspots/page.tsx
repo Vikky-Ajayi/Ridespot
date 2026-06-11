@@ -17,9 +17,14 @@ export default function HotspotsPage() {
   const router = useRouter();
   const filter = useHotspotStore((state) => state.filter);
   const setFilter = useHotspotStore((state) => state.setFilter);
-  const { hotspots, isStale, loading, position } = useHotspots(filter);
+  const { hotspots, isStale, loading, position, metadata } = useHotspots(filter);
   const startNavigation = useStartNavigation();
   const openHotspotDetails = useModalStore((state) => state.openHotspotDetails);
+  const metadataMessage = metadata?.shortfallReason
+    ? metadata.shortfallReason
+    : metadata?.expandedRadius
+      ? `Showing live events up to ${Math.round(metadata.effectiveRadiusMeters / 1000)}km away.`
+      : null;
 
   return (
     <DesktopShell className="bg-[#F7F8FA]">
@@ -55,6 +60,12 @@ export default function HotspotsPage() {
             </div>
           ) : null}
 
+          {!isStale && metadataMessage ? (
+            <div className="rounded-2xl bg-[#EEF7FF] px-3 py-2 text-[0.78rem] font-medium leading-tight text-[#1D4ED8]">
+              {metadataMessage}
+            </div>
+          ) : null}
+
           {loading ? (
             <div className="rounded-2xl bg-white px-4 py-5 text-[0.86rem] font-medium leading-tight text-[#667085]">
               Loading hotspot suggestions...
@@ -63,8 +74,8 @@ export default function HotspotsPage() {
 
           {!loading && !isStale && hotspots.length === 0 ? (
             <div className="rounded-2xl bg-white px-4 py-5 text-[0.86rem] font-medium leading-tight text-[#667085]">
-              No active hotspot suggestions yet. New demand zones will appear here when live event
-              signals are available.
+              No live events ending soon were found near you. RideSpot only shows real live-event
+              hotspots, so we won&apos;t invent advisory zones.
             </div>
           ) : null}
 

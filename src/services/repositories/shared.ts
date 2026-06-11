@@ -1,5 +1,5 @@
 import type { AxiosResponse } from "axios";
-import type { AuthUser, Hotspot, PlanTier, Profile } from "@/types";
+import type { AuthUser, Hotspot, HotspotSearchMetadata, PlanTier, Profile } from "@/types";
 import type { DemandLevel } from "@/types";
 
 export interface ApiEnvelope<T> {
@@ -64,6 +64,12 @@ export interface BackendHotspot {
   insightText: string;
   activeTimeStart?: string | null;
   activeTimeEnd?: string | null;
+  source?: string | null;
+  sourceUrl?: string | null;
+  venueName?: string | null;
+  estimatedEndTime?: boolean;
+  minutesUntilEnd?: number | null;
+  effectiveDistanceMeters?: number | null;
   timeRange: string;
   imageUrl?: string | null;
   generatedAt?: string;
@@ -92,6 +98,27 @@ export interface BackendHotspot {
   insight_text?: string | null;
   active_time_start?: string | null;
   active_time_end?: string | null;
+  source_url?: string | null;
+  venue_name?: string | null;
+  estimated_end_time?: boolean;
+  minutes_until_end?: number | null;
+  effective_distance_meters?: number | null;
+}
+
+export interface BackendHotspotSearchResponse {
+  hotspots: BackendHotspot[];
+  total: number;
+  generatedAt: string;
+  freshness?: string;
+  refreshing?: boolean;
+  lastRefreshedAt?: string | null;
+  requestedRadiusMeters?: number;
+  effectiveRadiusMeters?: number;
+  targetCount?: number;
+  returnedCount?: number;
+  expandedRadius?: boolean;
+  liveWindow?: "ending_within_1_hour";
+  shortfallReason?: string | null;
 }
 
 export interface BackendDemandByHour {
@@ -189,6 +216,29 @@ export function mapHotspot(hotspot: BackendHotspot): Hotspot {
     driversInZone,
     isCovered,
     city: hotspot.city ?? null,
-    country: hotspot.country ?? null
+    country: hotspot.country ?? null,
+    source: hotspot.source ?? null,
+    sourceUrl: hotspot.sourceUrl ?? hotspot.source_url ?? null,
+    venueName: hotspot.venueName ?? hotspot.venue_name ?? null,
+    estimatedEndTime: hotspot.estimatedEndTime ?? hotspot.estimated_end_time ?? false,
+    minutesUntilEnd: hotspot.minutesUntilEnd ?? hotspot.minutes_until_end ?? null,
+    effectiveDistanceMeters:
+      hotspot.effectiveDistanceMeters ?? hotspot.effective_distance_meters ?? null
+  };
+}
+
+export function mapHotspotSearchMetadata(
+  data: BackendHotspotSearchResponse
+): HotspotSearchMetadata {
+  return {
+    requestedRadiusMeters: data.requestedRadiusMeters ?? 15000,
+    effectiveRadiusMeters: data.effectiveRadiusMeters ?? data.requestedRadiusMeters ?? 15000,
+    targetCount: data.targetCount ?? 10,
+    returnedCount: data.returnedCount ?? data.hotspots.length,
+    expandedRadius: data.expandedRadius ?? false,
+    liveWindow: data.liveWindow ?? "ending_within_1_hour",
+    shortfallReason: data.shortfallReason ?? null,
+    refreshing: data.refreshing ?? false,
+    lastRefreshedAt: data.lastRefreshedAt ?? null
   };
 }

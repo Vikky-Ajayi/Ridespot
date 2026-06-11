@@ -33,7 +33,7 @@ export default function HomePage() {
     error: searchError,
     selectSuggestion
   } = usePlacesAutocomplete();
-  const { allHotspots, position, isStale, loading, refreshPosition } = useHotspots();
+  const { allHotspots, position, isStale, loading, refreshPosition, metadata } = useHotspots();
   const { showToast } = useToast();
   const startNavigation = useStartNavigation();
   const [mapFocusLocation, setMapFocusLocation] = useState<DriverLocation | null>(null);
@@ -48,6 +48,11 @@ export default function HomePage() {
   const clearNavigation = useNavigationStore((state) => state.clearNavigation);
 
   const isExpanded = homeSheetState === "expanded";
+  const metadataMessage = metadata?.shortfallReason
+    ? metadata.shortfallReason
+    : metadata?.expandedRadius
+      ? `Showing live events up to ${Math.round(metadata.effectiveRadiusMeters / 1000)}km away.`
+      : null;
   const navigationOverlay =
     navigationStatus === "starting" && previewOrigin && previewDestination
       ? {
@@ -190,6 +195,12 @@ export default function HomePage() {
                 </div>
               ) : null}
 
+              {!isStale && metadataMessage ? (
+                <div className="mb-3 rounded-2xl bg-[#EEF7FF] px-3 py-2 text-[0.78rem] font-medium leading-tight text-[#1D4ED8]">
+                  {metadataMessage}
+                </div>
+              ) : null}
+
               <div className="space-y-4">
                 {loading ? (
                   <div className="rounded-2xl bg-[#F4F6F8] px-4 py-4 text-[0.82rem] font-medium leading-tight text-[#667085]">
@@ -199,8 +210,8 @@ export default function HomePage() {
 
                 {!loading && !isStale && allHotspots.length === 0 ? (
                   <div className="rounded-2xl bg-[#F4F6F8] px-4 py-4 text-[0.82rem] font-medium leading-tight text-[#667085]">
-                    No active hotspot suggestions yet. We&apos;re checking live event demand and
-                    will update this list as soon as new zones are available.
+                    No live events ending soon were found near you. RideSpot only shows real
+                    live-event hotspots, so we won&apos;t invent advisory zones.
                   </div>
                 ) : null}
 

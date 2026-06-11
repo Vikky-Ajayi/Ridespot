@@ -2,7 +2,7 @@ import { canonicalMarketCountry } from "./country.js";
 
 export interface EventInput {
   externalId: string;
-  source: "ticketmaster" | "eventbrite" | "event_aggregator" | "google_places";
+  source: "ticketmaster" | "eventbrite" | "event_aggregator" | "google_places" | "manual";
   name: string;
   venueName: string | null;
   lat: number;
@@ -15,6 +15,8 @@ export interface EventInput {
   expectedAttendance: number | null;
   eventType: string | null;
   eventCategory: string | null;
+  sourceUrl?: string | null;
+  estimatedEndTime?: boolean;
   rawData: object;
 }
 
@@ -69,6 +71,8 @@ export function normaliseTicketmasterEvent(raw: Record<string, unknown>): EventI
         : null,
     eventType: null,
     eventCategory: classifications[0]?.segment ? String((classifications[0].segment as Record<string, unknown>).name ?? "") : null,
+    sourceUrl: typeof raw.url === "string" ? raw.url : null,
+    estimatedEndTime: false,
     rawData: raw
   };
 }
@@ -109,6 +113,8 @@ export function normaliseEventbriteEvent(raw: Record<string, unknown>): EventInp
         : null,
     eventType: null,
     eventCategory: category.name ? String(category.name) : null,
+    sourceUrl: typeof raw.url === "string" ? raw.url : null,
+    estimatedEndTime: false,
     rawData: raw
   };
 }

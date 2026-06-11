@@ -59,8 +59,9 @@ function buildPredictionInput(
   }
 ): PredictionInput {
   const startTime = new Date(event.start_time);
-  const endTime = event.end_time
-    ? new Date(event.end_time)
+  const effectiveEndTime = event.effective_end_time ?? event.end_time;
+  const endTime = effectiveEndTime
+    ? new Date(effectiveEndTime)
     : new Date(startTime.getTime() + 2 * 60 * 60 * 1000);
   const durationHours = Math.max(
     0.5,
@@ -227,6 +228,10 @@ export async function generateHotspotsFromEvents(events: ActiveEventRow[]) {
   const hotspots: GeneratedHotspot[] = [];
 
   for (const event of events) {
+    const effectiveEndTime =
+      event.effective_end_time ??
+      event.end_time ??
+      new Date(new Date(event.start_time).getTime() + 2 * 60 * 60 * 1000).toISOString();
     const currentDrivers = await driversNear(event.lat, event.lng);
     const [trafficScore, popularityScore] = await Promise.all([
       getTrafficScore(event.lat, event.lng),
@@ -265,8 +270,7 @@ export async function generateHotspotsFromEvents(events: ActiveEventRow[]) {
       routingDecision: prediction.routingDecision,
       insightText: prediction.insightText,
       activeTimeStart: event.start_time,
-      activeTimeEnd:
-        event.end_time ?? new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+      activeTimeEnd: effectiveEndTime,
       expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString()
     });
   }

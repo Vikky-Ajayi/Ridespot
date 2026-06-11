@@ -1,5 +1,12 @@
 import { api } from "@/services/api";
-import { mapHotspot, unwrapData, type BackendDemandByHour, type BackendHotspot } from "./shared";
+import {
+  mapHotspot,
+  mapHotspotSearchMetadata,
+  unwrapData,
+  type BackendDemandByHour,
+  type BackendHotspot,
+  type BackendHotspotSearchResponse
+} from "./shared";
 
 export const hotspotRepository = {
   async getHotspots(lat: number, lng: number, radius = 15000) {
@@ -7,14 +14,13 @@ export const hotspotRepository = {
       params: { lat, lng, radius, limit: 10 }
     });
 
-    const data = unwrapData<{ hotspots: BackendHotspot[]; total: number; generatedAt: string }>(
-      response
-    );
+    const data = unwrapData<BackendHotspotSearchResponse>(response);
 
     return {
       hotspots: data.hotspots.map(mapHotspot),
       total: data.total,
-      generatedAt: data.generatedAt
+      generatedAt: data.generatedAt,
+      metadata: mapHotspotSearchMetadata(data)
     };
   },
 

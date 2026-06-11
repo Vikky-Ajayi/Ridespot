@@ -30,6 +30,18 @@ export interface NavigationSession {
   cancelledAt?: string | null;
 }
 
+export interface HotspotSearchMetadata {
+  requestedRadiusMeters: number;
+  effectiveRadiusMeters: number;
+  targetCount: number;
+  returnedCount: number;
+  expandedRadius: boolean;
+  liveWindow: "ending_within_1_hour";
+  shortfallReason?: string | null;
+  refreshing?: boolean;
+  lastRefreshedAt?: string | null;
+}
+
 export interface Hotspot {
   id: string;
   name: string;
@@ -64,6 +76,12 @@ export interface Hotspot {
   isSuppressed?: boolean;
   city?: string | null;
   country?: string | null;
+  source?: string | null;
+  sourceUrl?: string | null;
+  venueName?: string | null;
+  estimatedEndTime?: boolean;
+  minutesUntilEnd?: number | null;
+  effectiveDistanceMeters?: number | null;
 }
 
 export interface DemandVisual {

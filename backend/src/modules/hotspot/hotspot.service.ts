@@ -35,11 +35,32 @@ interface HotspotRow {
   expires_at: string | null;
   city?: string | null;
   country?: string | null;
+  source?: "ticketmaster" | "eventbrite" | "event_aggregator" | "manual" | string | null;
+  source_url?: string | null;
+  venue_name?: string | null;
+  estimated_end_time?: boolean | null;
+  minutes_until_end?: string | number | null;
   event_raw_data?: unknown;
   lat: number;
   lng: number;
-  distance_meters?: number;
+  distance_meters?: number | string | null;
   drivers_in_zone?: string | number;
+}
+
+const REAL_HOTSPOT_EVENT_SOURCES = ["ticketmaster", "eventbrite", "event_aggregator", "manual"];
+const HOTSPOT_TARGET_COUNT = 10;
+const HOTSPOT_RADIUS_STEPS = [15000, 25000, 35000, 50000];
+const LIVE_EVENT_WINDOW = "ending_within_1_hour";
+
+function getRadiusSteps(requestedRadius: number) {
+  const requested = Math.min(Math.max(Math.round(requestedRadius), 1), 50000);
+  return Array.from(
+    new Set([requested, ...HOTSPOT_RADIUS_STEPS.filter((radius) => radius > requested)])
+  );
+}
+
+function formatRadiusKm(radiusMeters: number) {
+  return `${Math.round(radiusMeters / 1000)}km`;
 }
 
 function formatWindow(start: string | null, end: string | null) {
@@ -113,6 +134,14 @@ function mapHotspot(row: HotspotRow, routeEstimate?: RouteEstimate) {
   const driversInZone = Number(row.drivers_in_zone ?? 0);
   const isCovered = driversInZone >= driversNeeded;
   const routingDecision = normaliseRoutingDecision(row.routing_decision);
+  const distanceMeters =
+    row.distance_meters === null || row.distance_meters === undefined
+      ? null
+      : Number(row.distance_meters);
+  const minutesUntilEnd =
+    row.minutes_until_end === null || row.minutes_until_end === undefined
+      ? null
+      : Math.max(0, Math.round(Number(row.minutes_until_end)));
 
   return {
     id: row.id,
@@ -129,8 +158,8 @@ function mapHotspot(row: HotspotRow, routeEstimate?: RouteEstimate) {
     distanceText:
       routeEstimate?.distanceText ??
       row.distance_text ??
-      (typeof row.distance_meters === "number"
-        ? metersToKmText(Number(row.distance_meters))
+      (distanceMeters !== null && Number.isFinite(distanceMeters)
+        ? metersToKmText(Number(distanceMeters))
         : "Distance unavailable"),
     driverSaturation:
       row.driver_saturation ??
@@ -155,6 +184,14 @@ function mapHotspot(row: HotspotRow, routeEstimate?: RouteEstimate) {
     imageUrl: realEventImageUrl(row.event_raw_data),
     city: row.city ?? null,
     country: row.country ?? null,
+    source: row.source ?? null,
+    sourceUrl: row.source_url ?? null,
+    venueName: row.venue_name ?? row.name,
+    estimatedEndTime: Boolean(row.estimated_end_time),
+    minutesUntilEnd,
+    effectiveDistanceMeters: distanceMeters !== null && Number.isFinite(distanceMeters)
+      ? Math.round(Number(distanceMeters))
+      : null,
     generatedAt: row.generated_at,
     expiresAt: row.expires_at,
     isCovered
@@ -216,6 +253,114 @@ function buildDemandByHour(liveScore: number) {
   };
 }
 
+async function queryLiveHotspotRows(input: {
+  delayedForFreePlan: boolean;
+  lat: number;
+  lng: number;
+  radius: number;
+  limit: number;
+}) {
+  if (input.delayedForFreePlan) {
+    return query<HotspotRow>(
+      `WITH latest_delayed_snapshots AS (
+         SELECT DISTINCT ON (s.hotspot_id)
+           s.hotspot_id AS id,
+           s.name,
+           s.postcode,
+           s.demand_level,
+           s.demand_score,
+           s.live_score,
+           s.drivers_needed,
+           s.drive_time_text,
+           s.distance_text,
+           s.driver_saturation,
+           s.ml_confidence,
+           s.prediction_mode,
+           s.is_high_confidence,
+           s.operating_confidence_threshold,
+           s.operating_accuracy_target,
+           s.fallback_reason,
+           s.routing_decision,
+           s.insight_text,
+           s.active_time_start,
+           s.active_time_end,
+           s.generated_at,
+           NULL::timestamptz AS expires_at,
+           s.event_id,
+           s.location
+         FROM hotspot_snapshots s
+         JOIN events e ON e.id = s.event_id
+         WHERE s.generated_at <= NOW() - INTERVAL '30 minutes'
+           AND s.generated_at >= NOW() - INTERVAL '24 hours'
+           AND s.active_time_start <= NOW()
+           AND s.active_time_end IS NOT NULL
+           AND s.active_time_end BETWEEN NOW() AND NOW() + INTERVAL '1 hour'
+           AND e.source = ANY($5::text[])
+           AND ST_DWithin(s.location, ${geographyPointSql("$2", "$1")}, $3)
+         ORDER BY s.hotspot_id, s.generated_at DESC
+       ),
+       ranked AS (
+         SELECT
+           s.*,
+           e.city,
+           e.country,
+           e.source,
+           e.source_url,
+           e.venue_name,
+           e.estimated_end_time,
+           e.raw_data AS event_raw_data,
+           ${selectLatLng("s.location")},
+           ST_Distance(s.location, ${geographyPointSql("$2", "$1")}) AS distance_meters,
+           EXTRACT(EPOCH FROM (s.active_time_end - NOW())) / 60 AS minutes_until_end,
+           (
+             SELECT COUNT(*)
+             FROM driver_coverage dc
+             WHERE dc.hotspot_id = s.id
+           ) AS drivers_in_zone
+         FROM latest_delayed_snapshots s
+         JOIN events e ON e.id = s.event_id
+       )
+       SELECT *
+       FROM ranked
+       ORDER BY demand_score DESC, distance_meters ASC, active_time_end ASC
+       LIMIT $4`,
+      [input.lat, input.lng, input.radius, input.limit, REAL_HOTSPOT_EVENT_SOURCES]
+    );
+  }
+
+  return query<HotspotRow>(
+    `SELECT
+       h.*,
+       e.city,
+       e.country,
+       e.source,
+       e.source_url,
+       e.venue_name,
+       e.estimated_end_time,
+       e.raw_data AS event_raw_data,
+       ${selectLatLng("h.location")},
+       ST_Distance(h.location, ${geographyPointSql("$2", "$1")}) AS distance_meters,
+       EXTRACT(EPOCH FROM (h.active_time_end - NOW())) / 60 AS minutes_until_end,
+       (
+         SELECT COUNT(*)
+         FROM driver_coverage dc
+         WHERE dc.hotspot_id = h.id
+       ) AS drivers_in_zone
+     FROM hotspots h
+     JOIN events e ON e.id = h.event_id
+     WHERE h.is_active = TRUE
+       AND h.event_id IS NOT NULL
+        AND e.source = ANY($5::text[])
+       AND h.active_time_start <= NOW()
+       AND h.active_time_end IS NOT NULL
+       AND h.active_time_end BETWEEN NOW() AND NOW() + INTERVAL '1 hour'
+        AND ST_DWithin(h.location, ${geographyPointSql("$2", "$1")}, $3)
+     ORDER BY h.demand_score DESC, distance_meters ASC, h.active_time_end ASC
+     LIMIT $4`,
+    [input.lat, input.lng, input.radius, input.limit, REAL_HOTSPOT_EVENT_SOURCES]
+  );
+}
+
 export const hotspotService = {
   async getHotspots(options: {
     lat: number;
@@ -224,87 +369,49 @@ export const hotspotService = {
     limit: number;
     planTier: PlanTier;
   }) {
-    const areaRefresh = await areaRefreshService.ensureFresh({
+    const delayedForFreePlan = options.planTier === "free";
+    const requestedRadius = Math.min(Math.max(Math.round(options.radius), 1), 50000);
+    const radiusSteps = getRadiusSteps(requestedRadius);
+    const queryLimit = Math.min(Math.max(options.limit, HOTSPOT_TARGET_COUNT), 20);
+    let effectiveRadius = requestedRadius;
+    let areaRefresh = await areaRefreshService.ensureFresh({
       lat: options.lat,
       lng: options.lng,
-      radius: options.radius
+      radius: requestedRadius
     });
-    const delayedForFreePlan = options.planTier === "free";
-    const result = delayedForFreePlan
-      ? await query<HotspotRow>(
-          `WITH latest_delayed_snapshots AS (
-             SELECT DISTINCT ON (s.hotspot_id)
-               s.hotspot_id AS id,
-               s.name,
-               s.postcode,
-               s.demand_level,
-               s.demand_score,
-               s.live_score,
-               s.drivers_needed,
-               s.drive_time_text,
-               s.distance_text,
-               s.driver_saturation,
-               s.ml_confidence,
-               s.prediction_mode,
-               s.is_high_confidence,
-               s.operating_confidence_threshold,
-               s.operating_accuracy_target,
-               s.fallback_reason,
-               s.routing_decision,
-               s.insight_text,
-               s.active_time_start,
-               s.active_time_end,
-               s.generated_at,
-               NULL::timestamptz AS expires_at,
-               s.event_id,
-               s.location
-             FROM hotspot_snapshots s
-             WHERE s.generated_at <= NOW() - INTERVAL '30 minutes'
-               AND s.generated_at >= NOW() - INTERVAL '24 hours'
-               AND (s.active_time_end IS NULL OR s.active_time_end >= NOW())
-             ORDER BY s.hotspot_id, s.generated_at DESC
-           )
-           SELECT
-             s.*,
-             e.city,
-             e.country,
-             e.raw_data AS event_raw_data,
-             ${selectLatLng("s.location")},
-             ST_Distance(s.location, ${geographyPointSql("$2", "$1")}) AS distance_meters,
-             (
-               SELECT COUNT(*)
-               FROM driver_coverage dc
-               WHERE dc.hotspot_id = s.id
-             ) AS drivers_in_zone
-           FROM latest_delayed_snapshots s
-           LEFT JOIN events e ON e.id = s.event_id
-           WHERE ST_DWithin(s.location, ${geographyPointSql("$2", "$1")}, $3)
-           ORDER BY s.demand_score DESC, s.generated_at DESC
-           LIMIT $4`,
-          [options.lat, options.lng, options.radius, options.limit]
-        )
-      : await query<HotspotRow>(
-          `SELECT
-             h.*,
-             e.city,
-             e.country,
-             e.raw_data AS event_raw_data,
-             ${selectLatLng("h.location")},
-             ST_Distance(h.location, ${geographyPointSql("$2", "$1")}) AS distance_meters,
-             (
-               SELECT COUNT(*)
-               FROM driver_coverage dc
-               WHERE dc.hotspot_id = h.id
-             ) AS drivers_in_zone
-           FROM hotspots h
-           LEFT JOIN events e ON e.id = h.event_id
-           WHERE h.is_active = TRUE
-             AND (h.expires_at IS NULL OR h.expires_at > NOW())
-             AND ST_DWithin(h.location, ${geographyPointSql("$2", "$1")}, $3)
-           ORDER BY h.demand_score DESC, h.generated_at DESC
-           LIMIT $4`,
-          [options.lat, options.lng, options.radius, options.limit]
-        );
+    let result = await queryLiveHotspotRows({
+      delayedForFreePlan,
+      lat: options.lat,
+      lng: options.lng,
+      radius: requestedRadius,
+      limit: queryLimit
+    });
+
+    for (const radius of radiusSteps.slice(1)) {
+      if (result.rows.length >= HOTSPOT_TARGET_COUNT) {
+        break;
+      }
+
+      effectiveRadius = radius;
+      areaRefresh = await areaRefreshService.ensureFresh({
+        lat: options.lat,
+        lng: options.lng,
+        radius
+      });
+      result = await queryLiveHotspotRows({
+        delayedForFreePlan,
+        lat: options.lat,
+        lng: options.lng,
+        radius,
+        limit: queryLimit
+      });
+    }
+
+    const expandedRadius = effectiveRadius > requestedRadius;
+    const shortfallReason =
+      result.rows.length < HOTSPOT_TARGET_COUNT
+        ? `Only ${result.rows.length} live events ending soon were found within ${formatRadiusKm(effectiveRadius)}.`
+        : null;
 
     console.info(
       JSON.stringify({
@@ -312,10 +419,15 @@ export const hotspotService = {
         planTier: options.planTier,
         freshness: delayedForFreePlan ? "delayed" : "realtime",
         count: result.rows.length,
-        radiusMeters: options.radius,
+        requestedRadiusMeters: requestedRadius,
+        effectiveRadiusMeters: effectiveRadius,
+        targetCount: HOTSPOT_TARGET_COUNT,
+        expandedRadius,
+        liveWindow: LIVE_EVENT_WINDOW,
         areaKey: areaRefresh.areaKey,
         refreshing: areaRefresh.refreshing,
-        lastRefreshedAt: areaRefresh.lastRefreshedAt
+        lastRefreshedAt: areaRefresh.lastRefreshedAt,
+        shortfallReason
       })
     );
 
@@ -331,8 +443,22 @@ export const hotspotService = {
       freshness: delayedForFreePlan ? "delayed" : "realtime",
       refreshing: areaRefresh.refreshing,
       lastRefreshedAt: areaRefresh.lastRefreshedAt,
+      requestedRadiusMeters: requestedRadius,
+      effectiveRadiusMeters: effectiveRadius,
+      targetCount: HOTSPOT_TARGET_COUNT,
+      returnedCount: result.rows.length,
+      expandedRadius,
+      liveWindow: LIVE_EVENT_WINDOW,
+      shortfallReason,
       providerDiagnostics: {
         ...areaRefresh.providerDiagnostics,
+        requestedRadiusMeters: requestedRadius,
+        effectiveRadiusMeters: effectiveRadius,
+        targetCount: HOTSPOT_TARGET_COUNT,
+        returnedCount: result.rows.length,
+        expandedRadius,
+        liveWindow: LIVE_EVENT_WINDOW,
+        shortfallReason,
         routeEstimates: mapped.diagnostics
       }
     };
@@ -340,11 +466,22 @@ export const hotspotService = {
 
   async getHotspotById(id: string) {
     const result = await query<HotspotRow>(
-      `SELECT h.*, e.city, e.country, e.raw_data AS event_raw_data, ${selectLatLng("h.location")}
+      `SELECT
+         h.*,
+         e.city,
+         e.country,
+         e.source,
+         e.source_url,
+         e.venue_name,
+         e.estimated_end_time,
+         e.raw_data AS event_raw_data,
+         EXTRACT(EPOCH FROM (h.active_time_end - NOW())) / 60 AS minutes_until_end,
+         ${selectLatLng("h.location")}
        FROM hotspots h
-       LEFT JOIN events e ON e.id = h.event_id
-       WHERE h.id = $1`,
-      [id]
+       JOIN events e ON e.id = h.event_id
+       WHERE h.id = $1
+         AND e.source = ANY($2::text[])`,
+      [id, REAL_HOTSPOT_EVENT_SOURCES]
     );
 
     const hotspot = result.rows[0];
@@ -366,20 +503,28 @@ export const hotspotService = {
          h.*,
          e.city,
          e.country,
+         e.source,
+         e.source_url,
+         e.venue_name,
+         e.estimated_end_time,
          e.raw_data AS event_raw_data,
          ${selectLatLng("h.location")},
+         EXTRACT(EPOCH FROM (h.active_time_end - NOW())) / 60 AS minutes_until_end,
          (
            SELECT COUNT(*)
            FROM driver_coverage dc
            WHERE dc.hotspot_id = h.id
          ) AS drivers_in_zone
        FROM hotspots h
-       LEFT JOIN events e ON e.id = h.event_id
+       JOIN events e ON e.id = h.event_id
        WHERE h.is_active = TRUE
-         AND (h.expires_at IS NULL OR h.expires_at > NOW())
-       ORDER BY h.demand_score DESC, h.generated_at DESC
+         AND e.source = ANY($2::text[])
+         AND h.active_time_start <= NOW()
+         AND h.active_time_end IS NOT NULL
+         AND h.active_time_end BETWEEN NOW() AND NOW() + INTERVAL '1 hour'
+       ORDER BY h.demand_score DESC, h.active_time_end ASC
        LIMIT $1`,
-      [limit]
+      [limit, REAL_HOTSPOT_EVENT_SOURCES]
     );
 
     return result.rows.map((row) => mapHotspot(row));

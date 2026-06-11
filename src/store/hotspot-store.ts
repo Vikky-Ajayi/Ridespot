@@ -2,15 +2,21 @@
 
 import { create } from "zustand";
 import type { DemandLevel } from "@/lib/demandColors";
-import type { Hotspot } from "@/types";
+import type { Hotspot, HotspotSearchMetadata } from "@/types";
 
 interface HotspotState {
   hotspots: Hotspot[];
   generatedAt: string | null;
   isStale: boolean;
+  metadata: HotspotSearchMetadata | null;
   filter: "all" | Exclude<DemandLevel, "very-high">;
   homeSheetState: "peek" | "expanded";
-  setHotspots: (hotspots: Hotspot[], generatedAt?: string | null, isStale?: boolean) => void;
+  setHotspots: (
+    hotspots: Hotspot[],
+    generatedAt?: string | null,
+    isStale?: boolean,
+    metadata?: HotspotSearchMetadata | null
+  ) => void;
   addOrUpdateHotspot: (hotspot: Hotspot) => void;
   markZoneCovered: (hotspotId: string) => void;
   getCachedHotspots: () => Hotspot[];
@@ -22,10 +28,11 @@ export const useHotspotStore = create<HotspotState>((set) => ({
   hotspots: [],
   generatedAt: null,
   isStale: false,
+  metadata: null,
   filter: "all",
   homeSheetState: "peek",
-  setHotspots: (hotspots, generatedAt = null, isStale = false) =>
-    set({ hotspots, generatedAt, isStale }),
+  setHotspots: (hotspots, generatedAt = null, isStale = false, metadata = null) =>
+    set({ hotspots, generatedAt, isStale, metadata }),
   addOrUpdateHotspot: (hotspot) =>
     set((state) => ({
       hotspots: state.hotspots.some((item) => item.id === hotspot.id)

@@ -104,8 +104,9 @@ export function SubscriptionModal({ open, onClose }: SubscriptionModalProps) {
       const checkout = await paymentRepository.createCheckout(selectedTier);
       window.location.href = checkout.checkoutUrl;
     } catch (checkoutError) {
-      setError(getApiErrorMessage(checkoutError, "Unable to start checkout."));
-      showToast({ title: "Checkout unavailable", variant: "alert" });
+      const message = getApiErrorMessage(checkoutError, "Unable to start checkout.");
+      setError(message);
+      showToast({ title: "Checkout failed. See details below.", variant: "alert" });
     } finally {
       setSubmitting(false);
     }

@@ -5,12 +5,19 @@ export function getApiErrorMessage(error: unknown, fallback: string) {
         error?: {
           code?: string;
           message?: string;
+          details?: {
+            providerMessage?: string;
+          };
         };
       };
     };
   };
 
-  return apiError.response?.data?.error?.message ?? fallback;
+  return (
+    apiError.response?.data?.error?.message ??
+    apiError.response?.data?.error?.details?.providerMessage ??
+    fallback
+  );
 }
 
 export function getApiErrorCode(error: unknown) {

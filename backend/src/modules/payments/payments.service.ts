@@ -9,6 +9,13 @@ import type { PlanTier } from "../../utils/jwt.js";
 type PaidPlanTier = Exclude<PlanTier, "free">;
 type PaymentProvider = "flutterwave" | "sumup";
 type PaymentStatus = "pending" | "active" | "cancelled" | "expired" | "failed";
+type ProviderErrorStage =
+  | "oauth"
+  | "checkout"
+  | "v4_direct_charge"
+  | "legacy_checkout"
+  | "sumup_checkout"
+  | "poll_status";
 
 interface WebhookVerification {
   signature?: string | null;
@@ -68,6 +75,111 @@ const FLUTTERWAVE_V4_BASE_URLS = {
 } as const;
 
 let flutterwaveTokenCache: { accessToken: string; expiresAtMs: number } | null = null;
+
+const SENSITIVE_PROVIDER_KEY_PATTERN =
+  /(authorization|bearer|token|secret|password|client_secret|api[_-]?key|encryption|signature)/i;
+
+function truncateString(value: string, maxLength = 1200) {
+  return value.length > maxLength ? `${value.slice(0, maxLength)}... [truncated]` : value;
+}
+
+function sanitizeProviderData(value: unknown, depth = 0): unknown {
+  if (depth > 5) {
+    return "[truncated]";
+  }
+
+  if (Array.isArray(value)) {
+    return value.slice(0, 25).map((item) => sanitizeProviderData(item, depth + 1));
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .slice(0, 80)
+        .map(([key, item]) => [
+          key,
+          SENSITIVE_PROVIDER_KEY_PATTERN.test(key)
+            ? "[redacted]"
+            : sanitizeProviderData(item, depth + 1)
+        ])
+    );
+  }
+
+  return typeof value === "string" ? truncateString(value) : value;
+}
+
+function messageFromValue(value: unknown): string | null {
+  if (!value) {
+    return null;
+  }
+
+  if (typeof value === "string") {
+    return truncateString(value, 500);
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(messageFromValue).find(Boolean) ?? null;
+  }
+
+  if (typeof value !== "object") {
+    return truncateString(String(value), 500);
+  }
+
+  const record = value as Record<string, unknown>;
+  return (
+    messageFromValue(record.message) ??
+    messageFromValue(record.error_description) ??
+    messageFromValue(record.error) ??
+    messageFromValue(record.reason) ??
+    messageFromValue(record.detail) ??
+    messageFromValue(record.details) ??
+    messageFromValue(record.errors) ??
+    messageFromValue(asRecord(record.data).message) ??
+    messageFromValue(asRecord(record.meta).message) ??
+    null
+  );
+}
+
+function providerLabel(provider: PaymentProvider) {
+  return provider === "flutterwave" ? "Flutterwave" : "SumUp";
+}
+
+function createProviderError(provider: PaymentProvider, stage: ProviderErrorStage, error: unknown) {
+  if (axios.isAxiosError(error)) {
+    const providerResponse = sanitizeProviderData(error.response?.data);
+    const providerMessage =
+      messageFromValue(error.response?.data) ?? messageFromValue(error.message) ?? "Provider request failed";
+    const details = {
+      provider,
+      stage,
+      statusCode: error.response?.status ?? null,
+      providerMessage,
+      providerResponse,
+      requestUrl: error.config?.url,
+      method: error.config?.method?.toUpperCase()
+    };
+    const status = error.response?.status ? ` HTTP ${error.response.status}` : "";
+
+    return new AppError(
+      502,
+      "PAYMENT_PROVIDER_ERROR",
+      `${providerLabel(provider)} ${stage.replace(/_/g, " ")} failed${status}: ${providerMessage}`,
+      details
+    );
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  return new AppError(
+    502,
+    "PAYMENT_PROVIDER_ERROR",
+    `${providerLabel(provider)} ${stage.replace(/_/g, " ")} failed: ${message}`,
+    {
+      provider,
+      stage,
+      providerMessage: message
+    }
+  );
+}
 
 function amountMajor(amountMinor: number) {
   return Number((amountMinor / 100).toFixed(2));
@@ -192,14 +304,28 @@ async function getFlutterwaveAccessToken() {
     client_secret: env.FLUTTERWAVE_CLIENT_SECRET
   });
 
-  const response = await axios.post(FLUTTERWAVE_OAUTH_URL, body, {
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    timeout: 15000
-  });
+  let response;
+  try {
+    response = await axios.post(FLUTTERWAVE_OAUTH_URL, body, {
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      timeout: 15000
+    });
+  } catch (error) {
+    throw createProviderError("flutterwave", "oauth", error);
+  }
 
   const data = response.data as { access_token?: string; expires_in?: number };
   if (!data.access_token) {
-    throw new AppError(502, "PAYMENT_PROVIDER_ERROR", "Flutterwave V4 OAuth did not return an access token");
+    throw new AppError(
+      502,
+      "PAYMENT_PROVIDER_ERROR",
+      "Flutterwave V4 OAuth did not return an access token",
+      {
+        provider: "flutterwave",
+        stage: "oauth",
+        providerResponse: sanitizeProviderData(response.data)
+      }
+    );
   }
 
   flutterwaveTokenCache = {
@@ -264,36 +390,41 @@ async function createFlutterwaveV4Checkout(input: {
   const accessToken = await getFlutterwaveAccessToken();
   const name = splitName(input.driver.full_name);
   const traceId = input.reference;
-  const response = await axios.post(
-    `${flutterwaveBaseUrl()}/orchestration/direct-charges`,
-    {
-      amount: amountMajor(input.amountMinor),
-      currency: input.currency,
-      reference: input.reference,
-      redirect_url: defaultSuccessUrl(input.reference),
-      customer: {
-        email: input.driver.email,
-        name,
-        phone: parsePhone(input.driver.phone)
+  let response;
+  try {
+    response = await axios.post(
+      `${flutterwaveBaseUrl()}/orchestration/direct-charges`,
+      {
+        amount: amountMajor(input.amountMinor),
+        currency: input.currency,
+        reference: input.reference,
+        redirect_url: defaultSuccessUrl(input.reference),
+        customer: {
+          email: input.driver.email,
+          name,
+          phone: parsePhone(input.driver.phone)
+        },
+        payment_method: {
+          type: env.FLUTTERWAVE_PAYMENT_METHOD || "opay"
+        },
+        meta: {
+          subscriptionId: input.subscriptionId,
+          driverId: input.driver.id,
+          tier: input.tier
+        }
       },
-      payment_method: {
-        type: env.FLUTTERWAVE_PAYMENT_METHOD || "opay"
-      },
-      meta: {
-        subscriptionId: input.subscriptionId,
-        driverId: input.driver.id,
-        tier: input.tier
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "X-Trace-Id": traceId,
+          "X-Idempotency-Key": input.reference
+        },
+        timeout: 15000
       }
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "X-Trace-Id": traceId,
-        "X-Idempotency-Key": input.reference
-      },
-      timeout: 15000
-    }
-  );
+    );
+  } catch (error) {
+    throw createProviderError("flutterwave", "v4_direct_charge", error);
+  }
 
   const data = response.data as {
     data?: {
@@ -307,7 +438,16 @@ async function createFlutterwaveV4Checkout(input: {
   };
   const checkoutUrl = data.data?.next_action?.redirect_url?.url;
   if (!checkoutUrl) {
-    throw new AppError(502, "PAYMENT_PROVIDER_ERROR", "Flutterwave V4 did not return a redirect URL");
+    throw new AppError(
+      502,
+      "PAYMENT_PROVIDER_ERROR",
+      "Flutterwave V4 did not return a redirect URL",
+      {
+        provider: "flutterwave",
+        stage: "v4_direct_charge",
+        providerResponse: sanitizeProviderData(response.data)
+      }
+    );
   }
 
   return {
@@ -328,41 +468,50 @@ async function createFlutterwaveLegacyCheckout(input: {
   const planId =
     input.tier === "pro" ? env.FLUTTERWAVE_PRO_PLAN_ID_NG : env.FLUTTERWAVE_FLEET_PLAN_ID_NG;
 
-  const response = await axios.post(
-    "https://api.flutterwave.com/v3/payments",
-    {
-      tx_ref: input.reference,
-      amount: amountMajor(input.amountMinor),
-      currency: input.currency,
-      redirect_url: defaultSuccessUrl(input.reference),
-      payment_plan: planId || undefined,
-      customer: {
-        email: input.driver.email,
-        name: input.driver.full_name,
-        phonenumber: input.driver.phone ?? undefined
+  let response;
+  try {
+    response = await axios.post(
+      "https://api.flutterwave.com/v3/payments",
+      {
+        tx_ref: input.reference,
+        amount: amountMajor(input.amountMinor),
+        currency: input.currency,
+        redirect_url: defaultSuccessUrl(input.reference),
+        payment_plan: planId || undefined,
+        customer: {
+          email: input.driver.email,
+          name: input.driver.full_name,
+          phonenumber: input.driver.phone ?? undefined
+        },
+        customizations: {
+          title: `RideSpot ${input.tier}`,
+          description: `RideSpot ${input.tier} monthly subscription`
+        },
+        meta: {
+          subscriptionId: input.subscriptionId,
+          driverId: input.driver.id,
+          tier: input.tier
+        }
       },
-      customizations: {
-        title: `RideSpot ${input.tier}`,
-        description: `RideSpot ${input.tier} monthly subscription`
-      },
-      meta: {
-        subscriptionId: input.subscriptionId,
-        driverId: input.driver.id,
-        tier: input.tier
+      {
+        headers: {
+          Authorization: `Bearer ${secretKey}`
+        },
+        timeout: 15000
       }
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${secretKey}`
-      },
-      timeout: 15000
-    }
-  );
+    );
+  } catch (error) {
+    throw createProviderError("flutterwave", "legacy_checkout", error);
+  }
 
   const data = response.data as { data?: { link?: string; id?: string | number } };
   const checkoutUrl = data.data?.link;
   if (!checkoutUrl) {
-    throw new AppError(502, "PAYMENT_PROVIDER_ERROR", "Flutterwave did not return a checkout URL");
+    throw new AppError(502, "PAYMENT_PROVIDER_ERROR", "Flutterwave did not return a checkout URL", {
+      provider: "flutterwave",
+      stage: "legacy_checkout",
+      providerResponse: sanitizeProviderData(response.data)
+    });
   }
 
   return {
@@ -377,27 +526,32 @@ async function createSumUpCheckout(input: {
   amountMinor: number;
   currency: string;
 }) {
-  const response = await axios.post(
-    "https://api.sumup.com/v0.1/checkouts",
-    {
-      checkout_reference: input.reference,
-      amount: amountMajor(input.amountMinor),
-      currency: input.currency,
-      merchant_code: env.SUMUP_MERCHANT_CODE,
-      description: `RideSpot ${input.tier} monthly subscription`,
-      redirect_url: defaultSuccessUrl(input.reference),
-      return_url: defaultCancelUrl(input.reference),
-      hosted_checkout: {
-        enabled: true
-      }
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${env.SUMUP_API_KEY}`
+  let response;
+  try {
+    response = await axios.post(
+      "https://api.sumup.com/v0.1/checkouts",
+      {
+        checkout_reference: input.reference,
+        amount: amountMajor(input.amountMinor),
+        currency: input.currency,
+        merchant_code: env.SUMUP_MERCHANT_CODE,
+        description: `RideSpot ${input.tier} monthly subscription`,
+        redirect_url: defaultSuccessUrl(input.reference),
+        return_url: defaultCancelUrl(input.reference),
+        hosted_checkout: {
+          enabled: true
+        }
       },
-      timeout: 15000
-    }
-  );
+      {
+        headers: {
+          Authorization: `Bearer ${env.SUMUP_API_KEY}`
+        },
+        timeout: 15000
+      }
+    );
+  } catch (error) {
+    throw createProviderError("sumup", "sumup_checkout", error);
+  }
 
   const data = response.data as {
     id?: string;
@@ -411,7 +565,11 @@ async function createSumUpCheckout(input: {
     data.links?.find((link) => link.rel === "payment" || link.rel === "redirect")?.href;
 
   if (!checkoutUrl) {
-    throw new AppError(502, "PAYMENT_PROVIDER_ERROR", "SumUp did not return a checkout URL");
+    throw new AppError(502, "PAYMENT_PROVIDER_ERROR", "SumUp did not return a checkout URL", {
+      provider: "sumup",
+      stage: "sumup_checkout",
+      providerResponse: sanitizeProviderData(response.data)
+    });
   }
 
   return {
@@ -780,7 +938,7 @@ export const paymentsService = {
         throw error;
       }
 
-      throw new AppError(502, "PAYMENT_PROVIDER_ERROR", "Unable to create checkout with payment provider");
+      throw createProviderError(provider, "checkout", error);
     }
   },
 

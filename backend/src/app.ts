@@ -14,6 +14,26 @@ import { registerNavigationRoutes } from "./modules/navigation/navigation.routes
 import { registerNotificationRoutes } from "./modules/notifications/notifications.routes.js";
 import { toErrorResponse } from "./utils/http.js";
 
+function toSerializableDiagnostics(value: unknown): unknown {
+  if (value instanceof Error) {
+    return {
+      message: value.message,
+      name: value.name
+    };
+  }
+
+  if (value == null) {
+    return undefined;
+  }
+
+  try {
+    JSON.stringify(value);
+    return value;
+  } catch {
+    return String(value);
+  }
+}
+
 function getErrorDiagnostics(error: unknown) {
   const err = error as {
     code?: string;
@@ -31,13 +51,7 @@ function getErrorDiagnostics(error: unknown) {
     code: err.code,
     column: err.column,
     constraint: err.constraint,
-    details:
-      err.details instanceof Error
-        ? {
-            message: err.details.message,
-            name: err.details.name
-          }
-        : undefined,
+    details: toSerializableDiagnostics(err.details),
     message: err.message ?? String(error),
     name: err.name,
     routine: err.routine,

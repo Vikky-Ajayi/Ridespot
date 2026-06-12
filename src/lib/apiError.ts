@@ -7,17 +7,24 @@ export function getApiErrorMessage(error: unknown, fallback: string) {
           message?: string;
           details?: {
             providerMessage?: string;
+            remediation?: string;
           };
         };
       };
     };
   };
 
-  return (
+  const message =
     apiError.response?.data?.error?.message ??
     apiError.response?.data?.error?.details?.providerMessage ??
-    fallback
-  );
+    fallback;
+  const remediation = apiError.response?.data?.error?.details?.remediation;
+
+  if (remediation && !message.includes(remediation)) {
+    return `${message} ${remediation}`;
+  }
+
+  return message;
 }
 
 export function getApiErrorCode(error: unknown) {

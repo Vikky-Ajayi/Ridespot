@@ -49,7 +49,7 @@ const envSchema = z.object({
   FLUTTERWAVE_ENV: z.enum(["test", "live"]).default("live"),
   FLUTTERWAVE_CLIENT_ID: z.string().default(""),
   FLUTTERWAVE_CLIENT_SECRET: z.string().default(""),
-  FLUTTERWAVE_PAYMENT_METHOD: z.string().default("opay"),
+  FLUTTERWAVE_PAYMENT_METHOD: z.string().trim().default(""),
   FLUTTERWAVE_PUBLIC_KEY: z.string().default(""),
   FLUTTERWAVE_SECRET_KEY: z.string().default(""),
   FLUTTERWAVE_ENCRYPTION_KEY: z.string().default(""),

@@ -144,16 +144,37 @@ function providerLabel(provider: PaymentProvider) {
   return provider === "flutterwave" ? "Flutterwave" : "SumUp";
 }
 
+function getProviderRemediation(provider: PaymentProvider, stage: ProviderErrorStage, providerMessage: string) {
+  if (provider !== "flutterwave" || stage !== "v4_direct_charge") {
+    return null;
+  }
+
+  if (/opay/i.test(providerMessage) && /not enabled/i.test(providerMessage)) {
+    return (
+      "Your Flutterwave merchant is not enabled for Opay. Remove FLUTTERWAVE_PAYMENT_METHOD=opay, " +
+      "set FLUTTERWAVE_PAYMENT_METHOD to a V4 payment method enabled on your merchant account, " +
+      "or configure FLUTTERWAVE_SECRET_KEY with a FLWSECK... Standard Checkout secret to use hosted checkout."
+    );
+  }
+
+  return (
+    "Flutterwave V4 direct charges are payment-method specific. Confirm FLUTTERWAVE_PAYMENT_METHOD " +
+    "matches a payment method enabled on your Flutterwave merchant account."
+  );
+}
+
 function createProviderError(provider: PaymentProvider, stage: ProviderErrorStage, error: unknown) {
   if (axios.isAxiosError(error)) {
     const providerResponse = sanitizeProviderData(error.response?.data);
     const providerMessage =
       messageFromValue(error.response?.data) ?? messageFromValue(error.message) ?? "Provider request failed";
+    const remediation = getProviderRemediation(provider, stage, providerMessage);
     const details = {
       provider,
       stage,
       statusCode: error.response?.status ?? null,
       providerMessage,
+      remediation,
       providerResponse,
       requestUrl: error.config?.url,
       method: error.config?.method?.toUpperCase()
@@ -163,7 +184,9 @@ function createProviderError(provider: PaymentProvider, stage: ProviderErrorStag
     return new AppError(
       502,
       "PAYMENT_PROVIDER_ERROR",
-      `${providerLabel(provider)} ${stage.replace(/_/g, " ")} failed${status}: ${providerMessage}`,
+      `${providerLabel(provider)} ${stage.replace(/_/g, " ")} failed${status}: ${providerMessage}${
+        remediation ? ` ${remediation}` : ""
+      }`,
       details
     );
   }
@@ -257,12 +280,25 @@ async function getDriver(driverId: string) {
 }
 
 function requireProviderConfig(provider: PaymentProvider) {
-  if (provider === "flutterwave" && !hasFlutterwaveV4Config() && !getFlutterwaveStandardSecretKey()) {
-    throw new AppError(
-      503,
-      "PAYMENT_PROVIDER_UNCONFIGURED",
-      "Flutterwave V4 credentials are missing. Set FLUTTERWAVE_CLIENT_ID and FLUTTERWAVE_CLIENT_SECRET."
-    );
+  if (provider === "flutterwave") {
+    const hasStandardCheckout = Boolean(getFlutterwaveStandardSecretKey());
+    const hasV4DirectCharge = hasFlutterwaveV4Config();
+
+    if (!hasV4DirectCharge && !hasStandardCheckout) {
+      throw new AppError(
+        503,
+        "PAYMENT_PROVIDER_UNCONFIGURED",
+        "Flutterwave credentials are missing. Set V4 client credentials or FLUTTERWAVE_SECRET_KEY for hosted checkout."
+      );
+    }
+
+    if (!hasStandardCheckout && hasV4DirectCharge && !getFlutterwaveDirectChargeMethod()) {
+      throw new AppError(
+        503,
+        "PAYMENT_PROVIDER_UNCONFIGURED",
+        "Flutterwave V4 checkout requires FLUTTERWAVE_PAYMENT_METHOD to be set to a payment method enabled on your merchant account. Do not use opay unless Flutterwave has enabled Opay for your merchant."
+      );
+    }
   }
 
   if (provider === "sumup" && (!env.SUMUP_API_KEY || !env.SUMUP_MERCHANT_CODE)) {
@@ -282,6 +318,10 @@ function getFlutterwaveStandardSecretKey() {
 
 function hasFlutterwaveV4Config() {
   return Boolean(env.FLUTTERWAVE_CLIENT_ID && env.FLUTTERWAVE_CLIENT_SECRET);
+}
+
+function getFlutterwaveDirectChargeMethod() {
+  return env.FLUTTERWAVE_PAYMENT_METHOD.trim();
 }
 
 function flutterwaveBaseUrl() {
@@ -372,11 +412,11 @@ async function createFlutterwaveCheckout(input: {
   currency: string;
   driver: DriverPaymentRow;
 }) {
-  if (hasFlutterwaveV4Config()) {
-    return createFlutterwaveV4Checkout(input);
+  if (getFlutterwaveStandardSecretKey()) {
+    return createFlutterwaveLegacyCheckout(input);
   }
 
-  return createFlutterwaveLegacyCheckout(input);
+  return createFlutterwaveV4Checkout(input);
 }
 
 async function createFlutterwaveV4Checkout(input: {
@@ -388,6 +428,15 @@ async function createFlutterwaveV4Checkout(input: {
   driver: DriverPaymentRow;
 }) {
   const accessToken = await getFlutterwaveAccessToken();
+  const paymentMethod = getFlutterwaveDirectChargeMethod();
+  if (!paymentMethod) {
+    throw new AppError(
+      503,
+      "PAYMENT_PROVIDER_UNCONFIGURED",
+      "Flutterwave V4 checkout requires FLUTTERWAVE_PAYMENT_METHOD to be set to an enabled payment method."
+    );
+  }
+
   const name = splitName(input.driver.full_name);
   const traceId = input.reference;
   let response;
@@ -405,7 +454,7 @@ async function createFlutterwaveV4Checkout(input: {
           phone: parsePhone(input.driver.phone)
         },
         payment_method: {
-          type: env.FLUTTERWAVE_PAYMENT_METHOD || "opay"
+          type: paymentMethod
         },
         meta: {
           subscriptionId: input.subscriptionId,

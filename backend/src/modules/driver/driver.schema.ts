@@ -32,7 +32,13 @@ export const fcmTokenSchema = z.object({
 
 export const feedbackSchema = z.object({
   hotspotId: z.string().uuid(),
+  navigationSessionId: z.string().uuid().optional(),
   feedbackScore: z.number().min(0).max(5).optional(),
+  worthIt: z.boolean().optional(),
+  waitTimeMinutes: z.number().int().min(0).optional(),
   actedOn: z.boolean().optional(),
-  tripsCompleted: z.number().int().min(0).optional()
+  tripsCompleted: z.number().int().min(0).optional(),
+  estimatedEarnings: z.number().min(0).optional(),
+  rating: z.number().int().min(1).max(5).optional(),
+  notes: z.string().max(1000).optional()
 });

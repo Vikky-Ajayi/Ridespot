@@ -50,7 +50,7 @@ export interface BackendHotspot {
   distanceText: string;
   driverSaturation: string;
   mlConfidence?: number;
-  predictionMode?: "ml-certified" | "conservative-fallback";
+  predictionMode?: "ml-certified" | "conservative-fallback" | "event-directory";
   isHighConfidence?: boolean;
   operatingConfidenceThreshold?: number;
   operatingAccuracyTarget?: number;
@@ -85,7 +85,7 @@ export interface BackendHotspot {
   distance_text?: string | null;
   driver_saturation?: string | null;
   ml_confidence?: number;
-  prediction_mode?: "ml-certified" | "conservative-fallback";
+  prediction_mode?: "ml-certified" | "conservative-fallback" | "event-directory";
   is_high_confidence?: boolean;
   operating_confidence_threshold?: number;
   operating_accuracy_target?: number;
@@ -106,7 +106,8 @@ export interface BackendHotspot {
 }
 
 export interface BackendHotspotSearchResponse {
-  hotspots: BackendHotspot[];
+  hotspots?: BackendHotspot[];
+  events?: BackendHotspot[];
   total: number;
   generatedAt: string;
   freshness?: string;
@@ -117,7 +118,10 @@ export interface BackendHotspotSearchResponse {
   targetCount?: number;
   returnedCount?: number;
   expandedRadius?: boolean;
-  liveWindow?: "ending_within_1_hour";
+  liveWindow?: "ending_within_1_hour" | "next_3_days";
+  days?: number;
+  copy?: string | null;
+  excludedIncompleteEvents?: number;
   shortfallReason?: string | null;
 }
 
@@ -230,13 +234,18 @@ export function mapHotspot(hotspot: BackendHotspot): Hotspot {
 export function mapHotspotSearchMetadata(
   data: BackendHotspotSearchResponse
 ): HotspotSearchMetadata {
+  const rows = data.hotspots ?? data.events ?? [];
+
   return {
     requestedRadiusMeters: data.requestedRadiusMeters ?? 15000,
     effectiveRadiusMeters: data.effectiveRadiusMeters ?? data.requestedRadiusMeters ?? 15000,
     targetCount: data.targetCount ?? 10,
-    returnedCount: data.returnedCount ?? data.hotspots.length,
+    returnedCount: data.returnedCount ?? rows.length,
     expandedRadius: data.expandedRadius ?? false,
     liveWindow: data.liveWindow ?? "ending_within_1_hour",
+    days: data.days,
+    copy: data.copy ?? null,
+    excludedIncompleteEvents: data.excludedIncompleteEvents,
     shortfallReason: data.shortfallReason ?? null,
     refreshing: data.refreshing ?? false,
     lastRefreshedAt: data.lastRefreshedAt ?? null

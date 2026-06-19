@@ -6,6 +6,7 @@ import { getIntegrationStatuses } from "../../services/integrationHealth.service
 import { assertMarketCountry } from "../../utils/country.js";
 import { geographyPointSql, getHotspotsWithCoverage, selectLatLng } from "../../utils/geospatial.js";
 import { AppError } from "../../utils/http.js";
+import { eventsService } from "../events/events.service.js";
 import type { AdminRole } from "../../utils/adminJwt.js";
 
 interface AdminRow {
@@ -305,6 +306,10 @@ export const adminService = {
 
   async getIntegrationStatus() {
     return getIntegrationStatuses();
+  },
+
+  async getEventPipelineDiagnostics() {
+    return eventsService.getPipelineDiagnostics();
   },
 
   async getNotificationLogs(limit: number) {

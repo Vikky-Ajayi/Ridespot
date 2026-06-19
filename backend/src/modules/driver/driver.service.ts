@@ -181,17 +181,46 @@ export const driverService = {
 
   async submitFeedback(
     driverId: string,
-    payload: { hotspotId: string; feedbackScore?: number; actedOn?: boolean; tripsCompleted?: number }
+    payload: {
+      hotspotId: string;
+      navigationSessionId?: string;
+      feedbackScore?: number;
+      worthIt?: boolean;
+      waitTimeMinutes?: number;
+      actedOn?: boolean;
+      tripsCompleted?: number;
+      estimatedEarnings?: number;
+      rating?: number;
+      notes?: string;
+    }
   ) {
     await query(
-      `INSERT INTO prediction_feedback (driver_id, hotspot_id, feedback_score, acted_on, trips_completed)
-       VALUES ($1, $2, $3, $4, $5)`,
+      `INSERT INTO prediction_feedback (
+         driver_id,
+         hotspot_id,
+         navigation_session_id,
+         feedback_score,
+         worth_it,
+         wait_time_minutes,
+         acted_on,
+         trips_completed,
+         estimated_earnings,
+         rating,
+         notes
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
       [
         driverId,
         payload.hotspotId,
-        payload.feedbackScore ?? null,
+        payload.navigationSessionId ?? null,
+        payload.feedbackScore ?? payload.rating ?? null,
+        payload.worthIt ?? null,
+        payload.waitTimeMinutes ?? null,
         payload.actedOn ?? false,
-        payload.tripsCompleted ?? 0
+        payload.tripsCompleted ?? 0,
+        payload.estimatedEarnings ?? null,
+        payload.rating ?? null,
+        payload.notes ?? null
       ]
     );
   }

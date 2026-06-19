@@ -36,7 +36,10 @@ export interface HotspotSearchMetadata {
   targetCount: number;
   returnedCount: number;
   expandedRadius: boolean;
-  liveWindow: "ending_within_1_hour";
+  liveWindow: "ending_within_1_hour" | "next_3_days";
+  days?: number;
+  copy?: string | null;
+  excludedIncompleteEvents?: number;
   shortfallReason?: string | null;
   refreshing?: boolean;
   lastRefreshedAt?: string | null;
@@ -66,7 +69,7 @@ export interface Hotspot {
   driversInZone?: number;
   isCovered?: boolean;
   mlConfidence?: number;
-  predictionMode?: "ml-certified" | "conservative-fallback";
+  predictionMode?: "ml-certified" | "conservative-fallback" | "event-directory";
   isHighConfidence?: boolean;
   operatingConfidenceThreshold?: number;
   operatingAccuracyTarget?: number;

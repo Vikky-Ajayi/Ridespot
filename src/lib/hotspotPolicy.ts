@@ -19,6 +19,17 @@ function normaliseRoutingDecision(decision: Hotspot["routingDecision"]): Hotspot
   return decision === "go" || decision === "avoid" || decision === "watch" ? decision : "watch";
 }
 
+function formatSourceLabel(source?: string | null) {
+  if (!source) {
+    return "Event";
+  }
+
+  return source
+    .replace(/_/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
 export function getHotspotPolicyState(hotspot: Hotspot): HotspotPolicyState {
   const routingDecision = normaliseRoutingDecision(hotspot.routingDecision);
   const isCovered = hotspot.isCovered ?? false;
@@ -37,6 +48,21 @@ export function getHotspotPolicyState(hotspot: Hotspot): HotspotPolicyState {
       actionClassName: "bg-[#EEF0F4] text-[#6B7280]",
       pinLabel: "Covered",
       detailCopy: "This zone already has enough drivers. Head to a different hotspot."
+    };
+  }
+
+  if (hotspot.predictionMode === "event-directory" && canNavigate) {
+    return {
+      routingDecision,
+      canNavigate: true,
+      isCovered: false,
+      isSuppressed: false,
+      badgeLabel: formatSourceLabel(hotspot.source),
+      badgeClassName: "bg-[#FFF7E6] text-[#B45309]",
+      actionLabel: "Drive there",
+      actionClassName: "bg-black text-white",
+      pinLabel: "Event",
+      detailCopy: "This is a complete real event near you in the next 3 days."
     };
   }
 

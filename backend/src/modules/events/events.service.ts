@@ -198,16 +198,16 @@ async function ensureEventHotspot(client: PoolClient, eventId: string) {
        expires_at
      )
      SELECT
-       COALESCE($2, $3),
-       concat_ws(', ', $4, $5),
-       location,
-       300,
-       $6,
+        COALESCE($2::text, $3::text),
+        concat_ws(', ', $4::text, $5::text),
+        location,
+        300,
+        $6::text,
         $7::numeric,
         round($7::numeric)::int,
        'LOW',
        $8,
-       $9,
+        $9::text,
        start_time,
        end_time,
        id,

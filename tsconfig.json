@@ -1,45 +1,16 @@
 {
-  "compilerOptions": {
-    "target": "ES2022",
-    "lib": [
-      "DOM",
-      "DOM.Iterable",
-      "ES2022"
-    ],
-    "allowJs": false,
-    "skipLibCheck": true,
-    "strict": true,
-    "noEmit": true,
-    "esModuleInterop": true,
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "jsx": "preserve",
-    "incremental": true,
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ],
-    "baseUrl": ".",
-    "paths": {
-      "@/*": [
-        "./src/*"
-      ]
+  "extends": "./tsconfig.base.json",
+  "compileOnSave": false,
+  "files": [],
+  "references": [
+    {
+      "path": "./lib/db"
+    },
+    {
+      "path": "./lib/api-client-react"
+    },
+    {
+      "path": "./lib/api-zod"
     }
-  },
-  "include": [
-    "next-env.d.ts",
-    "src/**/*.ts",
-    "src/**/*.tsx",
-    ".next/types/**/*.ts",
-    ".next-prod/types/**/*.ts",
-    ".next-dev-3003/types/**/*.ts"
-  ],
-  "exclude": [
-    "node_modules",
-    "backend",
-    "ml-service"
   ]
 }

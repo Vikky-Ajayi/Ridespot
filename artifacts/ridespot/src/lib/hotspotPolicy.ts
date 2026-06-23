@@ -57,7 +57,7 @@ export function getHotspotPolicyState(hotspot: Hotspot): HotspotPolicyState {
       canNavigate: true,
       isCovered: false,
       isSuppressed: false,
-      badgeLabel: formatSourceLabel(hotspot.source),
+      badgeLabel: "Live Event",
       badgeClassName: "bg-[#FFF7E6] text-[#B45309]",
       actionLabel: "Drive there",
       actionClassName: "bg-black text-white",

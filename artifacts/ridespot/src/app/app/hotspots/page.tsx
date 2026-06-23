@@ -1,5 +1,5 @@
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DesktopShell } from "@/components/app/DesktopShell";
 import { HotspotCard } from "@/components/hotspot/HotspotCard";
@@ -21,14 +21,16 @@ function formatRadius(meters: number, country?: string | null) {
 }
 
 export default function HotspotsPage() {
-  const [pathname, setLocation] = useLocation();
+  const [, setLocation] = useLocation();
   const { position } = useDriverLocation();
   const startNavigation = useStartNavigation();
   const openHotspotDetails = useModalStore((state) => state.openHotspotDetails);
   const [events, setEvents] = useState<Hotspot[]>([]);
   const [metadata, setMetadata] = useState<HotspotSearchMetadata | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const hasLoadedOnce = useRef(false);
 
   const queryLat = position?.lat ?? FALLBACK_DRIVER_LOCATION.lat;
   const queryLng = position?.lng ?? FALLBACK_DRIVER_LOCATION.lng;
@@ -37,8 +39,14 @@ export default function HotspotsPage() {
   useEffect(() => {
     let isActive = true;
 
-    setLoading(true);
-    setError(null);
+    const isBackground = hasLoadedOnce.current;
+
+    if (isBackground) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+      setError(null);
+    }
 
     eventRepository
       .getNearbyEvents(queryLat, queryLng, 15000, 3, 50)
@@ -46,15 +54,18 @@ export default function HotspotsPage() {
         if (!isActive) return;
         setEvents(result.events);
         setMetadata(result.metadata);
+        hasLoadedOnce.current = true;
       })
       .catch(() => {
         if (!isActive) return;
-        setError("Unable to load nearby events right now.");
+        if (!hasLoadedOnce.current) {
+          setError("Unable to load nearby events right now.");
+        }
       })
       .finally(() => {
-        if (isActive) {
-          setLoading(false);
-        }
+        if (!isActive) return;
+        setLoading(false);
+        setRefreshing(false);
       });
 
     return () => {
@@ -113,33 +124,36 @@ export default function HotspotsPage() {
             </div>
           ) : null}
 
-          {loading ? (
+          {loading && !hasLoadedOnce.current ? (
             <div className="rounded-2xl bg-white px-4 py-5 text-[0.86rem] font-medium leading-tight text-[#667085]">
               Loading nearby events...
             </div>
           ) : null}
 
-          {!loading && !error && events.length === 0 ? (
-            <div className="rounded-2xl bg-white px-4 py-5 text-[0.86rem] font-medium leading-tight text-[#667085]">
-              No complete real events were found near you for the next 3 days. Provider events
-              without venue data are excluded until they can be enriched.
+          {refreshing ? (
+            <div className="rounded-2xl bg-[#EEF7FF] px-3 py-2 text-[0.78rem] font-medium leading-tight text-[#1D4ED8]">
+              Checking for new events…
             </div>
           ) : null}
 
-          {!loading
-            ? events.map((event) => (
-                <HotspotCard
-                  key={event.id}
-                  hotspot={event}
-                  onDriveThere={(selectedHotspot) => {
-                    void startNavigation(selectedHotspot, position ?? FALLBACK_DRIVER_LOCATION)
-                      .then(() => setLocation("/app/home"))
-                      .catch(() => undefined);
-                  }}
-                  onOpenDetails={openHotspotDetails}
-                />
-              ))
-            : null}
+          {!loading && !error && events.length === 0 ? (
+            <div className="rounded-2xl bg-white px-4 py-5 text-[0.86rem] font-medium leading-tight text-[#667085]">
+              No events were found near you for the next 3 days.
+            </div>
+          ) : null}
+
+          {events.map((event) => (
+            <HotspotCard
+              key={event.id}
+              hotspot={event}
+              onDriveThere={(selectedHotspot) => {
+                void startNavigation(selectedHotspot, position ?? FALLBACK_DRIVER_LOCATION)
+                  .then(() => setLocation("/app/home"))
+                  .catch(() => undefined);
+              }}
+              onOpenDetails={openHotspotDetails}
+            />
+          ))}
         </div>
 
         <BottomNav active="hotspots" />

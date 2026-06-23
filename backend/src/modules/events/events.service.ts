@@ -742,7 +742,7 @@ export const eventsService = {
       excludedIncompleteEvents: 0,
       shortfallReason:
         events.length < 10
-          ? `Only ${events.length} complete real events were found nearby.`
+          ? `Only ${events.length} events were found nearby.`
           : null
     };
   },

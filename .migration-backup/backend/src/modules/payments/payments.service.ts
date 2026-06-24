@@ -527,6 +527,7 @@ async function createFlutterwaveLegacyCheckout(input: {
         currency: input.currency,
         redirect_url: defaultSuccessUrl(input.reference),
         payment_plan: planId || undefined,
+        payment_options: env.FLUTTERWAVE_PAYMENT_METHOD?.trim() || "card,banktransfer,account,ussd",
         customer: {
           email: input.driver.email,
           name: input.driver.full_name,

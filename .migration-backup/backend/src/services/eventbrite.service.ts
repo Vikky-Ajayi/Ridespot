@@ -198,27 +198,31 @@ async function fetchEventbriteOfficialDiscoveryNear(
   }
 
   const now = input.startTime ?? new Date();
-  const endTime = input.endTime ?? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const endTime = input.endTime ?? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
   const radiusKm = Math.max(1, Math.ceil(input.radiusMeters / 1000));
 
-  const response = await eventbriteClient.get("/events/search/", {
-    headers: eventbriteHeaders(),
-    params: {
-      "location.latitude": input.lat,
-      "location.longitude": input.lng,
-      "location.within": `${radiusKm}km`,
-      "start_date.range_start": now.toISOString(),
-      "start_date.range_end": endTime.toISOString(),
-      expand: "venue,ticket_availability,category",
-      page_size: EVENTBRITE_PAGE_SIZE
-    },
-    validateStatus: () => true
-  });
+  const MAX_PAGES = 3;
+  const allRawEvents: Array<Record<string, unknown>> = [];
+  const diagnostics: EventSourceDiagnostic[] = [];
 
-  if (response.status < 200 || response.status >= 300) {
-    return {
-      events: [],
-      diagnostics: [
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const response = await eventbriteClient.get("/events/search/", {
+      headers: eventbriteHeaders(),
+      params: {
+        "location.latitude": input.lat,
+        "location.longitude": input.lng,
+        "location.within": `${radiusKm}km`,
+        "start_date.range_start": now.toISOString(),
+        "start_date.range_end": endTime.toISOString(),
+        expand: "venue,ticket_availability,category",
+        page_size: EVENTBRITE_PAGE_SIZE,
+        page
+      },
+      validateStatus: () => true
+    });
+
+    if (response.status < 200 || response.status >= 300) {
+      diagnostics.push(
         diagnostic({
           source: "eventbrite_official",
           status: response.status === 404 ? "unavailable" : "failed",
@@ -230,19 +234,25 @@ async function fetchEventbriteOfficialDiscoveryNear(
             response.status === 404
               ? "Eventbrite public search is not available for this token/API version"
               : "Eventbrite public search returned a non-success status",
-          details: {
-            statusCode: response.status,
-            statusText: response.statusText
-          }
+          details: { statusCode: response.status, statusText: response.statusText, page }
         })
-      ]
-    };
+      );
+      break;
+    }
+
+    const pageEvents: Array<Record<string, unknown>> = Array.isArray(response.data?.events)
+      ? response.data.events
+      : [];
+    allRawEvents.push(...pageEvents);
+
+    const pagination = response.data?.pagination as Record<string, unknown> | undefined;
+    const hasMore = Boolean(pagination?.has_more_items);
+    if (!hasMore || pageEvents.length === 0) {
+      break;
+    }
   }
 
-  const rawEvents: Array<Record<string, unknown>> = Array.isArray(response.data?.events)
-    ? response.data.events
-    : [];
-  const eventsInsideRadius = rawEvents.filter((event) => {
+  const eventsInsideRadius = allRawEvents.filter((event) => {
     const coordinates = rawEventCoordinates(event);
     return (
       coordinates !== null &&
@@ -253,20 +263,19 @@ async function fetchEventbriteOfficialDiscoveryNear(
     .map((event) => normaliseEventbriteEvent(event))
     .filter((event): event is EventInput => Boolean(event));
 
-  return {
-    events,
-    diagnostics: [
-      diagnostic({
-        source: "eventbrite_official",
-        status: "ok",
-        found: rawEvents.length,
-        normalised: events.length,
-        rejected: rawEvents.length - events.length,
-        geocoded: 0,
-        message: "Eventbrite public search completed"
-      })
-    ]
-  };
+  diagnostics.push(
+    diagnostic({
+      source: "eventbrite_official",
+      status: "ok",
+      found: allRawEvents.length,
+      normalised: events.length,
+      rejected: allRawEvents.length - events.length,
+      geocoded: 0,
+      message: "Eventbrite public search completed"
+    })
+  );
+
+  return { events, diagnostics };
 }
 
 function flattenJsonLd(node: unknown): Record<string, unknown>[] {
@@ -550,9 +559,17 @@ async function fetchEventbritePublicPageEventsNear(
 
   const context = await resolveMarket(input);
   const citySlug = slugify(context.city);
+  const countrySlug = context.eventbriteCountrySlug;
+  const base = `https://www.eventbrite.com/d/${countrySlug}--${citySlug}`;
   const urls = [
-    `https://www.eventbrite.com/d/${context.eventbriteCountrySlug}--${citySlug}/events/`,
-    `https://www.eventbrite.com/d/${context.eventbriteCountrySlug}--${citySlug}/all-events/`
+    `${base}/events/`,
+    `${base}/all-events/`,
+    `${base}/music/`,
+    `${base}/business/`,
+    `${base}/nightlife/`,
+    `${base}/food-and-drink/`,
+    `${base}/performing-arts/`,
+    `${base}/sports/`
   ];
   const diagnostics: EventSourceDiagnostic[] = [];
   const rawEventsByKey = new Map<string, Record<string, unknown>>();

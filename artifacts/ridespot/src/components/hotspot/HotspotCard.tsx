@@ -80,14 +80,6 @@ export function HotspotCard({
               <Clock3 className="size-4" />
               <span>{hotspot.timeRange}</span>
             </div>
-            <span
-              className={cn(
-                "inline-flex rounded-full px-2.5 py-1 text-[0.68rem] font-semibold tracking-[-0.03em]",
-                policy.badgeClassName
-              )}
-            >
-              {policy.badgeLabel}
-            </span>
           </div>
         </div>
       </div>

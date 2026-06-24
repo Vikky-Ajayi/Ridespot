@@ -1,6 +1,6 @@
 {
   "framework": "nextjs",
-  "installCommand": "cd frontend && npm install",
+  "installCommand": "mkdir -p node_modules/next && echo '{\"version\":\"14.2.30\",\"name\":\"next\"}' > node_modules/next/package.json && cd frontend && npm install",
   "buildCommand": "cd frontend && npm run build",
   "outputDirectory": "frontend/.next"
 }

@@ -49,11 +49,19 @@ export default function HomePage() {
   const isExpanded = homeSheetState === "expanded";
 
   const sortedHotspots = useMemo(() => {
-    return [...allHotspots].sort((a, b) => {
-      const aTime = a.activeTimeStart ? new Date(a.activeTimeStart).getTime() : Number.MAX_SAFE_INTEGER;
-      const bTime = b.activeTimeStart ? new Date(b.activeTimeStart).getTime() : Number.MAX_SAFE_INTEGER;
-      return aTime - bTime;
-    });
+    const now = Date.now();
+    const cutoff = now + 48 * 60 * 60 * 1000;
+    return [...allHotspots]
+      .filter((h) => {
+        if (!h.activeTimeStart) return true;
+        const t = new Date(h.activeTimeStart).getTime();
+        return t <= cutoff;
+      })
+      .sort((a, b) => {
+        const aTime = a.activeTimeStart ? new Date(a.activeTimeStart).getTime() : Number.MAX_SAFE_INTEGER;
+        const bTime = b.activeTimeStart ? new Date(b.activeTimeStart).getTime() : Number.MAX_SAFE_INTEGER;
+        return aTime - bTime;
+      });
   }, [allHotspots]);
   const navigationOverlay =
     navigationStatus === "starting" && previewOrigin && previewDestination

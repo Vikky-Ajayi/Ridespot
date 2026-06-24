@@ -1,4 +1,4 @@
-
+"use client";
 
 import { useEffect, useRef, type ReactNode } from "react";
 import { Toast } from "@/components/ui/Toast";

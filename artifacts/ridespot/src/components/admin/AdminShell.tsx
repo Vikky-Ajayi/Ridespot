@@ -1,7 +1,4 @@
-
-
-import { Link } from "wouter";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import { useEffect, type ReactNode } from "react";
 import {
   Activity,
@@ -36,8 +33,7 @@ export interface AdminShellProps {
 }
 
 export function AdminShell({ title, subtitle, children, action }: AdminShellProps) {
-  const [, navigate] = useLocation();
-  const [pathname] = useLocation();
+  const [pathname, navigate] = useLocation();
   const token = useAdminAuthStore((state) => state.token);
   const admin = useAdminAuthStore((state) => state.admin);
   const hydrated = useAdminAuthStore((state) => state.hydrated);

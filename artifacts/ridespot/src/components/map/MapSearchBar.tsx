@@ -1,4 +1,4 @@
-
+"use client";
 
 import { Search } from "lucide-react";
 import type { PlaceSuggestion } from "@/lib/googlePlaces";

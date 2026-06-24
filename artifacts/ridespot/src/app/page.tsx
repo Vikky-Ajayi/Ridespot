@@ -14,8 +14,8 @@ import {
   pricingPlans,
   testimonials
 } from "@/data/marketing";
-
-import { Link } from "wouter";
+;
+import { Link } from 'wouter';
 
 export default function LandingPage() {
   return (

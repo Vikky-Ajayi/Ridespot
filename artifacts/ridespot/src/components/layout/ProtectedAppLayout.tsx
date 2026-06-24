@@ -1,8 +1,8 @@
-
+"use client";
 
 import type { ReactNode } from "react";
 import { useEffect } from "react";
-import { useLocation } from "wouter";
+import { useLocation } from 'wouter';
 import { useAuth } from "@/hooks/useAuth";
 import { useLocationSearchParams } from "@/hooks/useLocationSearchParams";
 import { usePushNotifications } from "@/hooks/usePushNotifications";

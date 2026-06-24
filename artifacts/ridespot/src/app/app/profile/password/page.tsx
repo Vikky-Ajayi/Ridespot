@@ -1,8 +1,8 @@
-
+"use client";
 
 import { useState } from "react";
 import { ChevronLeft } from "lucide-react";
-import { useLocation } from "wouter";
+import { useLocation } from 'wouter';
 import { DesktopShell } from "@/components/app/DesktopShell";
 import { useLocationSearchParams } from "@/hooks/useLocationSearchParams";
 import { useToast } from "@/hooks/useToast";

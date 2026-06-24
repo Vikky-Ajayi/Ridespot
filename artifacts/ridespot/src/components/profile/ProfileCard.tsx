@@ -1,4 +1,4 @@
-
+"use client";
 
 import { Pencil, UserRound } from "lucide-react";
 

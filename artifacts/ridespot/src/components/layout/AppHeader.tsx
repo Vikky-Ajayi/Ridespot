@@ -1,4 +1,4 @@
-
+"use client";
 
 import { Bell, UserRound } from "lucide-react";
 import { useMemo } from "react";

@@ -1,4 +1,4 @@
-
+"use client";
 
 import { create } from "zustand";
 import type { DemandLevel } from "@/lib/demandColors";

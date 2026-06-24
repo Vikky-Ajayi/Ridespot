@@ -1,4 +1,4 @@
-
+"use client";
 
 import { useToastStore } from "@/store/toast-store";
 

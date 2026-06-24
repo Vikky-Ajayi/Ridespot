@@ -1,9 +1,9 @@
+"use client";
 
-
-import { Link } from "wouter";
+import { Link } from 'wouter';
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Controller, useForm } from "react-hook-form";
-import { useLocation } from "wouter";
+import { useLocation } from 'wouter';
 import { useState } from "react";
 import { z } from "zod";
 import { AuthPageHeader } from "@/components/layout/AuthPageHeader";

@@ -1,4 +1,4 @@
-
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { Flame, Gauge, ShieldCheck } from "lucide-react";

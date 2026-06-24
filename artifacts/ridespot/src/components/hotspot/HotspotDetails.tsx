@@ -1,7 +1,7 @@
-
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
-
+;
 import { Clock3, MapPin, X } from "lucide-react";
 import { DemandByHourChart } from "@/components/hotspot/DemandByHourChart";
 import { HotspotStatsGrid } from "@/components/hotspot/HotspotStatsGrid";

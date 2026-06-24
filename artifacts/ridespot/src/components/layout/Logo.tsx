@@ -1,5 +1,5 @@
-
-import { Link } from "wouter";
+;
+import { Link } from 'wouter';
 import { cn } from "@/lib/utils";
 
 export interface LogoProps {

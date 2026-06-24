@@ -1,4 +1,4 @@
-
+"use client";
 
 import { Check, ExternalLink, X } from "lucide-react";
 import type { Hotspot, NavigationSession } from "@/types";

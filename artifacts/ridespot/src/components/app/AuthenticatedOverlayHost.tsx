@@ -1,7 +1,7 @@
-
+"use client";
 
 import { useEffect } from "react";
-import { useLocation } from "wouter";
+import { useLocation } from 'wouter';
 import { useAuth } from "@/hooks/useAuth";
 import { useLocationSearchParams } from "@/hooks/useLocationSearchParams";
 import { useNotifications } from "@/hooks/useNotifications";

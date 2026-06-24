@@ -1,7 +1,7 @@
-
+"use client";
 
 import { useState } from "react";
-import { useLocation } from "wouter";
+import { useLocation } from 'wouter';
 import { AuthPageHeader } from "@/components/layout/AuthPageHeader";
 import { BackButton } from "@/components/ui/BackButton";
 import { Button } from "@/components/ui/Button";

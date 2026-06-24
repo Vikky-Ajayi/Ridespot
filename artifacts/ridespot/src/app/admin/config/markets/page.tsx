@@ -1,4 +1,4 @@
-
+"use client";
 
 import { useEffect, useState } from "react";
 import { Save, Settings2 } from "lucide-react";

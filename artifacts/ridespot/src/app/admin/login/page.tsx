@@ -1,7 +1,7 @@
-
+"use client";
 
 import { useState, type FormEvent } from "react";
-import { useLocation } from "wouter";
+import { useLocation } from 'wouter';
 import { ShieldCheck } from "lucide-react";
 import { Logo } from "@/components/layout/Logo";
 import { getApiErrorMessage } from "@/lib/apiError";

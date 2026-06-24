@@ -1,6 +1,6 @@
+"use client";
 
-
-import { Link } from "wouter";
+import { Link } from 'wouter';
 import { PwaInstallButton } from "@/components/landing/PwaInstallButton";
 import { publicNavCta, publicNavItems } from "@/data/public-nav";
 

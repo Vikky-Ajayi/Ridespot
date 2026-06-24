@@ -1,8 +1,8 @@
-
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronLeft, User } from "lucide-react";
-import { useLocation } from "wouter";
+import { useLocation } from 'wouter';
 import { DesktopShell } from "@/components/app/DesktopShell";
 import { useAuth } from "@/hooks/useAuth";
 import { useLocationSearchParams } from "@/hooks/useLocationSearchParams";

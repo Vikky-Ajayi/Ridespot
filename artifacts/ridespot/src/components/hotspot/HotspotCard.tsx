@@ -1,6 +1,6 @@
+"use client";
 
-
-
+;
 import { CalendarDays, ChevronRight, Clock3, MapPin } from "lucide-react";
 import { HotspotStatsGrid } from "@/components/hotspot/HotspotStatsGrid";
 import { getDemandColor } from "@/lib/demandColors";

@@ -1,4 +1,4 @@
-
+"use client";
 
 import { navigationRepository } from "@/services/repositories";
 import { useNavigationStore } from "@/store/navigation-store";

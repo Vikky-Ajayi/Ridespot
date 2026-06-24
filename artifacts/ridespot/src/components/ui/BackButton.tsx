@@ -1,4 +1,4 @@
-import { Link } from "wouter";
+import { Link } from 'wouter';
 import { ChevronLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 

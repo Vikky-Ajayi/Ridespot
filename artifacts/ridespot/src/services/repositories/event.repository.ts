@@ -32,10 +32,10 @@ export const eventRepository = {
       params: { lat, lng, radius, days, limit }
     });
     const data = unwrapData<BackendNearbyEventsResponse>(response);
-    const rows = deduplicateById(data.events ?? data.hotspots ?? []);
+    const rows = data.events ?? data.hotspots ?? [];
 
     return {
-      events: rows.map(mapHotspot),
+      events: deduplicateById(rows.map(mapHotspot)),
       total: data.total ?? rows.length,
       generatedAt: data.generatedAt ?? new Date().toISOString(),
       metadata: mapHotspotSearchMetadata({

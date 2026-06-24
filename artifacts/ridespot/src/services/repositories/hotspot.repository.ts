@@ -17,10 +17,10 @@ export const hotspotRepository = {
 
     const data = unwrapData<BackendHotspotSearchResponse>(response);
 
-    const rows = deduplicateById(data.hotspots ?? []);
+    const rows = data.hotspots ?? [];
 
     return {
-      hotspots: rows.map(mapHotspot),
+      hotspots: deduplicateById(rows.map(mapHotspot)),
       total: data.total,
       generatedAt: data.generatedAt,
       metadata: mapHotspotSearchMetadata(data)

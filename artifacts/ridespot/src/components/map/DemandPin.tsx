@@ -1,4 +1,4 @@
-
+"use client";
 
 import type { CSSProperties } from "react";
 import { Flame } from "lucide-react";

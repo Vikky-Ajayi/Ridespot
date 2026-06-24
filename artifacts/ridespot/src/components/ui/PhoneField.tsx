@@ -1,4 +1,4 @@
-
+"use client";
 
 import PhoneInput from "react-phone-input-2";
 

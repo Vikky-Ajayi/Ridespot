@@ -1,6 +1,6 @@
+"use client";
 
-
-import { Link } from "wouter";
+import { Link } from 'wouter';
 import { Flame, House, UserRound } from "lucide-react";
 import { useLocationSearchParams } from "@/hooks/useLocationSearchParams";
 import { cn } from "@/lib/utils";

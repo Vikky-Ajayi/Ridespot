@@ -1,4 +1,4 @@
-import { Link } from "wouter";
+import { Link } from 'wouter';
 import { MapPin } from "lucide-react";
 import { Logo } from "@/components/layout/Logo";
 

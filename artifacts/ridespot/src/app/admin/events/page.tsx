@@ -1,4 +1,4 @@
-
+"use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { CalendarPlus, Pencil, Trash2 } from "lucide-react";

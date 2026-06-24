@@ -1,4 +1,4 @@
-
+"use client";
 
 import type { FormHTMLAttributes, ReactNode } from "react";
 import { Menu, X } from "lucide-react";

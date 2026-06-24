@@ -1,4 +1,4 @@
-
+"use client";
 
 import { LogOut, X } from "lucide-react";
 import { ModalSheet } from "@/components/app/ModalSheet";

@@ -1,4 +1,4 @@
-
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { Bell, CheckCircle2, MousePointerClick } from "lucide-react";

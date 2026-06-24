@@ -1,4 +1,4 @@
-
+"use client";
 
 import { useMemo, useSyncExternalStore } from "react";
 

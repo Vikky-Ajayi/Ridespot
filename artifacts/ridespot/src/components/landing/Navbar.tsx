@@ -1,6 +1,6 @@
+"use client";
 
-
-import { Link } from "wouter";
+import { Link } from 'wouter';
 import { Menu, X } from "lucide-react";
 import { useId, useState } from "react";
 import { PwaInstallButton } from "@/components/landing/PwaInstallButton";

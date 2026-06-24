@@ -1,4 +1,4 @@
-
+"use client";
 
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
@@ -11,7 +11,7 @@ import {
   Mail,
   Moon
 } from "lucide-react";
-import { useLocation } from "wouter";
+import { useLocation } from 'wouter';
 import { DesktopShell } from "@/components/app/DesktopShell";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { BottomNav } from "@/components/layout/BottomNav";

@@ -1,4 +1,4 @@
-
+"use client";
 
 import { BellRing, CheckCheck, Flame, Info, TestTube2, X, Zap } from "lucide-react";
 import { ModalSheet } from "@/components/app/ModalSheet";

@@ -1,4 +1,4 @@
-import { Link } from "wouter";
+import { Link } from 'wouter';
 import { Check, X } from "lucide-react";
 import type { PricingItem } from "@/data/marketing";
 import { cn } from "@/lib/utils";

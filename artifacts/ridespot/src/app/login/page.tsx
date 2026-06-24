@@ -1,8 +1,8 @@
+"use client";
 
-
-import { Link } from "wouter";
+import { Link } from 'wouter';
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useLocation } from "wouter";
+import { useLocation } from 'wouter';
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";

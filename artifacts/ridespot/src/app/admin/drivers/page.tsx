@@ -1,4 +1,4 @@
-
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { Clock, MapPin, Users } from "lucide-react";

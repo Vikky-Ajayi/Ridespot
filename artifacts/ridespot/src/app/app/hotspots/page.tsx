@@ -1,7 +1,7 @@
-
+"use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useLocation } from "wouter";
+import { useLocation } from 'wouter';
 import { DesktopShell } from "@/components/app/DesktopShell";
 import { HotspotCard } from "@/components/hotspot/HotspotCard";
 import { AppHeader } from "@/components/layout/AppHeader";

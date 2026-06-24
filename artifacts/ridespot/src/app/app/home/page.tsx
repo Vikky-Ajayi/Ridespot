@@ -1,5 +1,5 @@
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { motion } from "framer-motion";
 import { DesktopShell } from "@/components/app/DesktopShell";
@@ -8,14 +8,14 @@ import { AppHeader } from "@/components/layout/AppHeader";
 import { BottomNav } from "@/components/layout/BottomNav";
 import { MapContainer } from "@/components/map/MapContainer";
 import { NavigationRouteControls } from "@/components/map/NavigationRouteControls";
-import { useHotspots } from "@/hooks/useHotspots";
+import { useDriverLocation } from "@/hooks/useDriverLocation";
 import { useLocationSearchParams } from "@/hooks/useLocationSearchParams";
 import { usePlacesAutocomplete } from "@/hooks/usePlacesAutocomplete";
 import { useStartNavigation } from "@/hooks/useStartNavigation";
 import { useToast } from "@/hooks/useToast";
 import { FALLBACK_DRIVER_LOCATION } from "@/lib/location";
 import { openGoogleMapsDirections } from "@/lib/maps";
-import { navigationRepository } from "@/services/repositories";
+import { eventRepository, navigationRepository } from "@/services/repositories";
 import { useHotspotStore } from "@/store/hotspot-store";
 import { useModalStore } from "@/store/modal-store";
 import { useNavigationStore } from "@/store/navigation-store";
@@ -32,7 +32,39 @@ export default function HomePage() {
     error: searchError,
     selectSuggestion
   } = usePlacesAutocomplete();
-  const { allHotspots, position, isStale, loading, refreshPosition, metadata } = useHotspots();
+  const { position, refreshPosition } = useDriverLocation();
+  const [allHotspots, setAllHotspots] = useState<Hotspot[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [isStale, setIsStale] = useState(false);
+  const hasLoadedOnce = useRef(false);
+
+  useEffect(() => {
+    if (!position) return;
+    let isActive = true;
+
+    if (!hasLoadedOnce.current) {
+      setLoading(true);
+    }
+
+    eventRepository
+      .getNearbyEvents(position.lat, position.lng, 15000, 3, 50)
+      .then((result) => {
+        if (!isActive) return;
+        setAllHotspots(result.events);
+        setIsStale(false);
+        hasLoadedOnce.current = true;
+      })
+      .catch(() => {
+        if (!isActive) return;
+        if (!hasLoadedOnce.current) setIsStale(true);
+      })
+      .finally(() => {
+        if (!isActive) return;
+        setLoading(false);
+      });
+
+    return () => { isActive = false; };
+  }, [position?.lat, position?.lng]);
   const { showToast } = useToast();
   const startNavigation = useStartNavigation();
   const [mapFocusLocation, setMapFocusLocation] = useState<DriverLocation | null>(null);

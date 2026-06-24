@@ -1,5 +1,6 @@
 import { api } from "@/services/api";
 import {
+  deduplicateById,
   mapHotspot,
   mapHotspotSearchMetadata,
   unwrapData,
@@ -16,7 +17,7 @@ export const hotspotRepository = {
 
     const data = unwrapData<BackendHotspotSearchResponse>(response);
 
-    const rows = data.hotspots ?? [];
+    const rows = deduplicateById(data.hotspots ?? []);
 
     return {
       hotspots: rows.map(mapHotspot),

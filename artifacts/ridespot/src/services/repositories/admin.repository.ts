@@ -1,5 +1,5 @@
 import { adminApi } from "@/services/admin-api";
-import type { ApiEnvelope, BackendHotspot } from "./shared";
+import { deduplicateById, type ApiEnvelope, type BackendHotspot } from "./shared";
 
 function unwrapAdminData<T>(response: { data: ApiEnvelope<T> }) {
   return response.data.data;
@@ -155,7 +155,7 @@ export const adminRepository = {
 
   async getActiveHotspots() {
     const response = await adminApi.get("/api/admin/hotspots/active");
-    return unwrapAdminData<AdminHotspot[]>(response);
+    return deduplicateById(unwrapAdminData<AdminHotspot[]>(response));
   },
 
   async getNotificationLogs(limit = 100) {
@@ -179,7 +179,7 @@ export const adminRepository = {
     const response = await adminApi.get("/api/admin/events", {
       params: { limit }
     });
-    return unwrapAdminData<AdminEvent[]>(response);
+    return deduplicateById(unwrapAdminData<AdminEvent[]>(response));
   },
 
   async createEvent(input: AdminEventInput) {

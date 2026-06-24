@@ -163,6 +163,45 @@ export function mapProfile(profile: BackendProfile): Profile {
   };
 }
 
+function formatHourMinute(isoString: string): string {
+  const d = new Date(isoString);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }).toLowerCase();
+}
+
+function buildTimeRange(
+  backendTimeRange: string | undefined,
+  activeTimeStart: string | null,
+  activeTimeEnd: string | null
+): string {
+  if (activeTimeStart) {
+    const start = new Date(activeTimeStart);
+    if (!Number.isNaN(start.getTime())) {
+      const startStr = formatHourMinute(activeTimeStart);
+      if (activeTimeEnd) {
+        const end = new Date(activeTimeEnd);
+        if (!Number.isNaN(end.getTime()) && end.getTime() !== start.getTime()) {
+          return `${startStr} - ${formatHourMinute(activeTimeEnd)}`;
+        }
+      }
+      return startStr;
+    }
+  }
+  if (backendTimeRange && backendTimeRange !== "0:00 am - 0:00 am") {
+    return backendTimeRange;
+  }
+  return "Time TBC";
+}
+
+export function deduplicateById<T extends { id: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+}
+
 export function mapHotspot(hotspot: BackendHotspot): Hotspot {
   const demandLevel = hotspot.demandLevel ?? hotspot.demand_level ?? "low";
   const demandScore = hotspot.demandScore ?? hotspot.demand_score ?? 0;
@@ -185,7 +224,7 @@ export function mapHotspot(hotspot: BackendHotspot): Hotspot {
     name: hotspot.name,
     postcode: hotspot.postcode ?? "",
     demandLevel,
-    timeRange: hotspot.timeRange ?? "10:45 PM - 11:30 PM",
+    timeRange: buildTimeRange(hotspot.timeRange, activeTimeStart, activeTimeEnd),
     driveTime: hotspot.driveTimeText ?? hotspot.drive_time_text ?? "ETA unavailable",
     distance: hotspot.distanceText ?? hotspot.distance_text ?? "Distance unavailable",
     driverSaturation: hotspot.driverSaturation ?? hotspot.driver_saturation ?? "LOW",

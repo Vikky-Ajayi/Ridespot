@@ -1,6 +1,7 @@
 import { api } from "@/services/api";
 import type { Hotspot, HotspotSearchMetadata } from "@/types";
 import {
+  deduplicateById,
   mapHotspot,
   mapHotspotSearchMetadata,
   unwrapData,
@@ -31,7 +32,7 @@ export const eventRepository = {
       params: { lat, lng, radius, days, limit }
     });
     const data = unwrapData<BackendNearbyEventsResponse>(response);
-    const rows = data.events ?? data.hotspots ?? [];
+    const rows = deduplicateById(data.events ?? data.hotspots ?? []);
 
     return {
       events: rows.map(mapHotspot),

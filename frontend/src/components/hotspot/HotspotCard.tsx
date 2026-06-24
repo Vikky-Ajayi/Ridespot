@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { ChevronRight, Clock3, MapPin } from "lucide-react";
+import { CalendarDays, ChevronRight, Clock3, MapPin } from "lucide-react";
 import { HotspotStatsGrid } from "@/components/hotspot/HotspotStatsGrid";
 import { getDemandColor } from "@/lib/demandColors";
 import { getHotspotPolicyState } from "@/lib/hotspotPolicy";
@@ -65,6 +65,18 @@ export function HotspotCard({
           </p>
 
           <div className="mt-2 flex flex-wrap items-center gap-2">
+            {hotspot.activeTimeStart ? (
+              <div className="inline-flex items-center gap-1.5 rounded-xl bg-[#ECEDEF] px-2.5 py-2 text-[0.92rem] font-semibold text-[#63666C]">
+                <CalendarDays className="size-4" />
+                <span>
+                  {new Date(hotspot.activeTimeStart).toLocaleDateString("en-GB", {
+                    weekday: "short",
+                    day: "numeric",
+                    month: "short"
+                  })}
+                </span>
+              </div>
+            ) : null}
             <div className="inline-flex items-center gap-1.5 rounded-xl bg-[#ECEDEF] px-2.5 py-2 text-[0.92rem] font-semibold text-[#63666C]">
               <Clock3 className="size-4" />
               <span>{hotspot.timeRange}</span>

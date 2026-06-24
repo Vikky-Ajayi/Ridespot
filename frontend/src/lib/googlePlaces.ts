@@ -1,8 +1,8 @@
 "use client";
 
-import { setOptions, importLibrary } from "@googlemaps/js-api-loader";
+import { Loader } from "@googlemaps/js-api-loader";
 
-let loaderPromise: Promise<void> | null = null;
+let loaderPromise: Promise<typeof google> | null = null;
 
 declare global {
   interface Window {
@@ -33,14 +33,14 @@ export interface SelectedPlace {
   } | null;
 }
 
-export function loadGooglePlaces(): Promise<void> {
+export function loadGooglePlaces() {
   if (typeof window === "undefined") {
     return Promise.reject(new Error("Google Places is only available in the browser."));
   }
 
-  const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   if (!apiKey) {
-    return Promise.reject(new Error("VITE_GOOGLE_MAPS_API_KEY is not configured."));
+    return Promise.reject(new Error("NEXT_PUBLIC_GOOGLE_MAPS_API_KEY is not configured."));
   }
 
   window.gm_authFailure = () => {
@@ -49,8 +49,11 @@ export function loadGooglePlaces(): Promise<void> {
   };
 
   if (!loaderPromise) {
-    setOptions({ key: apiKey, v: "weekly" });
-    loaderPromise = importLibrary("places").then(() => undefined);
+    loaderPromise = new Loader({
+      apiKey,
+      version: "weekly",
+      libraries: ["places"]
+    }).load();
   }
 
   return loaderPromise;

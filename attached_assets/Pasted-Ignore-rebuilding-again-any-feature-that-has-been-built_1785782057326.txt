@@ -1,0 +1,1479 @@
+Ignore rebuilding again any feature that has been built just make sure its built well
+
+## Context & Repository
+
+- **Repo**: https://github.com/Vikky-Ajayi/Ridespot (public)
+- **Stack**: Express 5 + Drizzle ORM + PostgreSQL (backend), Expo React Native (mobile), pnpm monorepo, deployed on Railway
+- **Production URL**: `https://ridespot-production-8e87.up.railway.app`
+- **Existing routes**: `/api/auth/*`, `/api/driver/*`, `/api/hotspots` (static mock), `/api/health`
+- **Missing**: payments, real hotspot engine, event scraper, restaurant data, real-time delivery
+
+---
+
+## What Must Be Built — Non-Negotiable
+
+1. **Flutterwave payment integration** — checkout link + webhook subscription upgrade
+2. **Real hotspot engine** backed by live event + restaurant data (replace static mock)
+3. **Mass event scraper** — Eventbrite (900k+ target), Ticketmaster, Meetup, Google Events, Nairaland, Facebook Events
+4. **BullMQ + Redis worker system** — persistent queues, cron-triggered scrapers, parallel workers
+5. **Google Places restaurant cluster engine** for delivery hotspots
+6. **Server-Sent Events (SSE)** for real-time hotspot delivery to the mobile app
+7. **Mobile app fully wired** to all real endpoints — no mock data, no fake timeouts
+
+---
+
+## Target Coverage
+
+- **Lagos, Nigeria** — all local government areas and the wider Lagos metro
+- **United Kingdom** — London, Manchester, Birmingham, Leeds, Glasgow, Bristol, Edinburgh, Liverpool, Sheffield, Nottingham, Cardiff, Newcastle, and all other major cities
+
+---
+
+## SECTION 1 — Dependencies & Infrastructure
+
+### 1.1 Add to `artifacts/api-server/package.json`
+
+```json
+"bullmq": "^5",
+"ioredis": "^5",
+"playwright": "^1",
+"@playwright/test": "^1",
+"playwright-extra": "^4",
+"puppeteer-extra-plugin-stealth": "^2",
+"cheerio": "^1",
+"node-cron": "^3",
+"axios": "^1",
+"flutterwave-node-v3": "^1",
+"@googlemaps/google-maps-services-js": "^3",
+"p-limit": "^5",
+"p-retry": "^6"
+```
+
+### 1.2 Redis on Railway
+
+Add a Railway Redis plugin to the same project. Set env var:
+```
+REDIS_URL=redis://default:<password>@<host>:<port>
+```
+
+### 1.3 Required Environment Variables (add to Railway)
+
+```
+REDIS_URL=                        # Railway Redis
+FLUTTERWAVE_PUBLIC_KEY=FLWPUBK_...
+FLUTTERWAVE_SECRET_KEY=FLWSECK_...
+FLUTTERWAVE_WEBHOOK_SECRET=       # set in FLW dashboard
+GOOGLE_PLACES_API_KEY=            # Google Cloud console
+TICKETMASTER_API_KEY=             # developer.ticketmaster.com free tier
+MEETUP_API_KEY=                   # meetup.com developer
+DATABASE_URL=                     # already set
+SESSION_SECRET=                   # already set
+NODE_ENV=production
+```
+
+---
+
+## SECTION 2 — Database Schema (Drizzle)
+
+Add the following tables to `lib/db/src/schema/`. Run `pnpm drizzle-kit push` after.
+
+### 2.1 `events` table
+
+```typescript
+export const eventsTable = pgTable('events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  externalId: varchar('external_id', { length: 255 }).notNull(),
+  source: varchar('source', { length: 50 }).notNull(), // 'eventbrite' | 'ticketmaster' | 'meetup' | 'google' | 'nairaland' | 'facebook'
+  title: text('title').notNull(),
+  venueName: text('venue_name'),
+  venueAddress: text('venue_address'),
+  venueLat: doublePrecision('venue_lat').notNull(),
+  venueLng: doublePrecision('venue_lng').notNull(),
+  city: varchar('city', { length: 100 }).notNull(),
+  country: varchar('country', { length: 10 }).notNull(), // 'NG' | 'GB'
+  startTime: timestamp('start_time', { withTimezone: true }).notNull(),
+  endTime: timestamp('end_time', { withTimezone: true }),
+  expectedAttendance: integer('expected_attendance').default(0),
+  category: varchar('category', { length: 100 }),
+  imageUrl: text('image_url'),
+  eventUrl: text('event_url'),
+  rawData: jsonb('raw_data'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  uniqueSourceId: uniqueIndex('events_source_external_idx').on(t.source, t.externalId),
+  venueLatLngIdx: index('events_venue_latlng_idx').on(t.venueLat, t.venueLng),
+  startTimeIdx: index('events_start_time_idx').on(t.startTime),
+  cityIdx: index('events_city_idx').on(t.city),
+}));
+```
+
+### 2.2 `hotspots` table (replaces static mock)
+
+```typescript
+export const hotspotsTable = pgTable('hotspots', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: text('name').notNull(),
+  lat: doublePrecision('lat').notNull(),
+  lng: doublePrecision('lng').notNull(),
+  radius: integer('radius').notNull().default(800), // metres
+  intensityScore: integer('intensity_score').notNull().default(0), // 0–100
+  category: varchar('category', { length: 20 }).notNull(), // 'taxi' | 'delivery'
+  city: varchar('city', { length: 100 }).notNull(),
+  country: varchar('country', { length: 10 }).notNull(),
+  driverSaturation: varchar('driver_saturation', { length: 10 }).default('LOW'), // LOW|MEDIUM|HIGH
+  demandRequests: varchar('demand_requests', { length: 10 }).default('HIGH'),
+  demandLabel: text('demand_label'),
+  driveTimeMinutes: integer('drive_time_minutes').default(10),
+  distanceKm: doublePrecision('distance_km').default(5),
+  timeStart: varchar('time_start', { length: 20 }),
+  timeEnd: varchar('time_end', { length: 20 }),
+  activeEvents: jsonb('active_events').default([]), // array of stripped event objects
+  expiryTimestamp: timestamp('expiry_timestamp', { withTimezone: true }),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  categoryIdx: index('hotspots_category_idx').on(t.category),
+  activeIdx: index('hotspots_active_idx').on(t.isActive),
+  latLngIdx: index('hotspots_latlng_idx').on(t.lat, t.lng),
+}));
+```
+
+### 2.3 `restaurant_clusters` table
+
+```typescript
+export const restaurantClustersTable = pgTable('restaurant_clusters', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: text('name').notNull(), // e.g. "Victoria Island Restaurant Hub"
+  lat: doublePrecision('lat').notNull(),
+  lng: doublePrecision('lng').notNull(),
+  radius: integer('radius').notNull().default(600),
+  restaurantCount: integer('restaurant_count').default(0),
+  densityScore: integer('density_score').default(0), // 0–100
+  city: varchar('city', { length: 100 }).notNull(),
+  country: varchar('country', { length: 10 }).notNull(),
+  topRestaurants: jsonb('top_restaurants').default([]), // [{name, rating, cuisine}]
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+```
+
+### 2.4 `payment_transactions` table
+
+```typescript
+export const paymentTransactionsTable = pgTable('payment_transactions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  driverId: uuid('driver_id').notNull().references(() => usersTable.id),
+  flwReference: varchar('flw_reference', { length: 255 }).notNull().unique(),
+  txRef: varchar('tx_ref', { length: 255 }).notNull().unique(), // our internal reference
+  plan: varchar('plan', { length: 20 }).notNull(), // 'pro' | 'fleet'
+  amount: doublePrecision('amount').notNull(),
+  currency: varchar('currency', { length: 5 }).default('NGN'),
+  status: varchar('status', { length: 20 }).default('pending'), // pending|successful|failed
+  webhookPayload: jsonb('webhook_payload'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+```
+
+### 2.5 `scraper_jobs` table
+
+```typescript
+export const scraperJobsTable = pgTable('scraper_jobs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  source: varchar('source', { length: 50 }).notNull(),
+  status: varchar('status', { length: 20 }).default('idle'), // idle|running|done|failed
+  lastRunAt: timestamp('last_run_at', { withTimezone: true }),
+  nextRunAt: timestamp('next_run_at', { withTimezone: true }),
+  eventsScraped: integer('events_scraped').default(0),
+  totalEventsInDb: integer('total_events_in_db').default(0),
+  errorMessage: text('error_message'),
+  metadata: jsonb('metadata').default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+```
+
+### 2.6 Update `users` table
+
+Add to the existing `usersTable`:
+```typescript
+subscriptionPlan: varchar('subscription_plan', { length: 20 }).default('free'), // 'free'|'pro'|'fleet'
+subscriptionExpiresAt: timestamp('subscription_expires_at', { withTimezone: true }),
+```
+
+---
+
+## SECTION 3 — Event Scraping System
+
+### 3.1 Architecture Overview
+
+```
+node-cron (scheduler)
+    │
+    ├── Every 30 min → enqueue EventbriteScrapeJob
+    ├── Every 1 hour → enqueue TicketmasterScrapeJob
+    ├── Every 1 hour → enqueue MeetupScrapeJob
+    ├── Every 2 hours → enqueue GoogleEventsScrapeJob
+    ├── Every 2 hours → enqueue NairalandScrapeJob
+    ├── Every 24 hours → enqueue RestaurantClusterRefreshJob
+    └── Every 5 min → enqueue HotspotRecalculationJob
+
+BullMQ Queues (Redis-backed):
+    - scraper-queue (concurrency: 5)
+    - hotspot-queue (concurrency: 2)
+
+Workers process jobs, upsert to DB, trigger SSE broadcast
+```
+
+### 3.2 File Structure to Create
+
+```
+artifacts/api-server/src/
+├── workers/
+│   ├── index.ts               # starts all workers
+│   ├── scrapers/
+│   │   ├── eventbrite.ts      # Eventbrite web scraper
+│   │   ├── ticketmaster.ts    # Ticketmaster Discovery API
+│   │   ├── meetup.ts          # Meetup GraphQL API
+│   │   ├── google-events.ts   # Google Search scraper
+│   │   ├── nairaland.ts       # Nairaland HTML scraper
+│   │   └── facebook-events.ts # Facebook public events scraper
+│   ├── restaurant-clusters.ts # Google Places restaurant discovery
+│   └── hotspot-engine.ts      # Hotspot recalculation worker
+├── queues/
+│   ├── index.ts               # BullMQ queue definitions + Redis connection
+│   └── scheduler.ts           # node-cron job scheduler
+└── sse/
+    └── index.ts               # SSE manager (broadcast to connected clients)
+```
+
+### 3.3 BullMQ Queue Setup (`queues/index.ts`)
+
+```typescript
+import { Queue, Worker } from 'bullmq';
+import IORedis from 'ioredis';
+
+export const redisConnection = new IORedis(process.env.REDIS_URL!, {
+  maxRetriesPerRequest: null,
+});
+
+export const scraperQueue = new Queue('scraper', {
+  connection: redisConnection,
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: 'exponential', delay: 5000 },
+    removeOnComplete: 100,
+    removeOnFail: 50,
+  },
+});
+
+export const hotspotQueue = new Queue('hotspot', {
+  connection: redisConnection,
+  defaultJobOptions: { attempts: 2, removeOnComplete: 10 },
+});
+```
+
+### 3.4 Eventbrite Scraper (`workers/scrapers/eventbrite.ts`)
+
+**Strategy**: Eventbrite's website makes calls to their internal search API at `https://www.eventbrite.com/api/v3/destination/search/`. This is accessible without a partner API key by sending browser-like requests. Paginate through results by iterating over location + date combinations.
+
+```typescript
+import axios from 'axios';
+import pLimit from 'p-limit';
+import pRetry from 'p-retry';
+import { db } from '@workspace/db';
+import { eventsTable } from '@workspace/db/schema';
+import { eq, and } from 'drizzle-orm';
+
+// Target location sets for Lagos and UK cities
+const SEARCH_LOCATIONS = [
+  // Lagos
+  { place: 'Lagos, Nigeria', lat: 6.5244, lng: 3.3792, country: 'NG', city: 'Lagos' },
+  // UK major cities
+  { place: 'London, United Kingdom', lat: 51.5074, lng: -0.1278, country: 'GB', city: 'London' },
+  { place: 'Manchester, United Kingdom', lat: 53.4808, lng: -2.2426, country: 'GB', city: 'Manchester' },
+  { place: 'Birmingham, United Kingdom', lat: 52.4862, lng: -1.8904, country: 'GB', city: 'Birmingham' },
+  { place: 'Leeds, United Kingdom', lat: 53.8008, lng: -1.5491, country: 'GB', city: 'Leeds' },
+  { place: 'Glasgow, United Kingdom', lat: 55.8642, lng: -4.2518, country: 'GB', city: 'Glasgow' },
+  { place: 'Bristol, United Kingdom', lat: 51.4545, lng: -2.5879, country: 'GB', city: 'Bristol' },
+  { place: 'Edinburgh, United Kingdom', lat: 55.9533, lng: -3.1883, country: 'GB', city: 'Edinburgh' },
+  { place: 'Liverpool, United Kingdom', lat: 53.4084, lng: -2.9916, country: 'GB', city: 'Liverpool' },
+  { place: 'Sheffield, United Kingdom', lat: 53.3811, lng: -1.4701, country: 'GB', city: 'Sheffield' },
+  { place: 'Nottingham, United Kingdom', lat: 52.9548, lng: -1.1581, country: 'GB', city: 'Nottingham' },
+  { place: 'Cardiff, United Kingdom', lat: 51.4816, lng: -3.1791, country: 'GB', city: 'Cardiff' },
+  { place: 'Newcastle, United Kingdom', lat: 54.9783, lng: -1.6178, country: 'GB', city: 'Newcastle' },
+  { place: 'Belfast, United Kingdom', lat: 54.5973, lng: -5.9301, country: 'GB', city: 'Belfast' },
+  { place: 'Leicester, United Kingdom', lat: 52.6369, lng: -1.1398, country: 'GB', city: 'Leicester' },
+];
+
+const HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept': 'application/json, text/plain, */*',
+  'Accept-Language': 'en-GB,en;q=0.9',
+  'Referer': 'https://www.eventbrite.com/',
+  'Origin': 'https://www.eventbrite.com',
+};
+
+async function fetchEventbritePage(location: typeof SEARCH_LOCATIONS[0], page: number): Promise<any[]> {
+  const url = `https://www.eventbrite.com/api/v3/destination/search/`;
+  const params = {
+    'slots': 100,
+    'page': page,
+    'expand.destination_event': [
+      'primary_venue', 'image', 'ticket_availability', 'saves', 'event_sales_status',
+      'primary_organizer', 'public_collections'
+    ].join(','),
+    'page_size': 50,
+    'source': 'discover',
+    'lat': location.lat,
+    'lng': location.lng,
+    'distance': '50km',
+    'sort_by': 'date',
+    'online_events_only': false,
+  };
+
+  const response = await pRetry(
+    async () => {
+      const res = await axios.get(url, { headers: HEADERS, params, timeout: 15000 });
+      return res.data;
+    },
+    {
+      retries: 4,
+      minTimeout: 2000,
+      maxTimeout: 10000,
+      onFailedAttempt: (err) => console.warn(`Eventbrite page ${page} attempt ${err.attemptNumber} failed`),
+    }
+  );
+
+  return response?.events?.results ?? [];
+}
+
+function parseEventbriteEvent(raw: any, location: typeof SEARCH_LOCATIONS[0]) {
+  const venue = raw.primary_venue;
+  if (!venue?.address?.latitude || !venue?.address?.longitude) return null;
+
+  return {
+    externalId: raw.id,
+    source: 'eventbrite' as const,
+    title: raw.name,
+    venueName: venue.name,
+    venueAddress: venue.address?.localized_address_display,
+    venueLat: parseFloat(venue.address.latitude),
+    venueLng: parseFloat(venue.address.longitude),
+    city: location.city,
+    country: location.country,
+    startTime: new Date(raw.start_date + 'T' + raw.start_time),
+    endTime: raw.end_date ? new Date(raw.end_date + 'T' + raw.end_time) : null,
+    expectedAttendance: raw.ticket_availability?.maximum_ticket_price ? 200 : 100,
+    category: raw.tags?.[0]?.display_name ?? null,
+    imageUrl: raw.image?.url ?? null,
+    eventUrl: raw.url ?? null,
+    rawData: raw,
+    updatedAt: new Date(),
+  };
+}
+
+export async function runEventbriteScraper(signal?: AbortSignal) {
+  const limit = pLimit(3); // 3 locations in parallel
+  let totalScraped = 0;
+
+  await Promise.all(
+    SEARCH_LOCATIONS.map((location) =>
+      limit(async () => {
+        let page = 1;
+        let hasMore = true;
+
+        while (hasMore && !signal?.aborted) {
+          const rawEvents = await fetchEventbritePage(location, page);
+          if (rawEvents.length === 0) { hasMore = false; break; }
+
+          const parsed = rawEvents.map(e => parseEventbriteEvent(e, location)).filter(Boolean);
+
+          if (parsed.length > 0) {
+            await db.insert(eventsTable)
+              .values(parsed as any[])
+              .onConflictDoUpdate({
+                target: [eventsTable.source, eventsTable.externalId],
+                set: {
+                  title: sql`excluded.title`,
+                  startTime: sql`excluded.start_time`,
+                  endTime: sql`excluded.end_time`,
+                  expectedAttendance: sql`excluded.expected_attendance`,
+                  updatedAt: new Date(),
+                },
+              });
+            totalScraped += parsed.length;
+          }
+
+          page++;
+          // Polite delay: 300-600ms between pages per location
+          await new Promise(r => setTimeout(r, 300 + Math.random() * 300));
+
+          // Stop after 400 pages per location (20,000 events) per run;
+          // continuous runs across all locations hit 900k+ over time
+          if (page > 400) hasMore = false;
+        }
+      })
+    )
+  );
+
+  return totalScraped;
+}
+```
+
+**Important note on reaching 900k events**: 
+- 15 locations × 400 pages × 50 events = 300,000 per full sweep
+- Run the scraper every 30 minutes continuously (the scheduler below)
+- Each run does an incremental pass (upsert = no duplicates), so DB accumulates over time
+- To maximise coverage: add more location search terms (neighbourhoods, postal codes), vary date ranges (next 7 days, next 30 days, next 90 days), and vary categories in the search query
+- For UK specifically: add all 650+ UK towns as separate location entries to maximise coverage
+
+### 3.5 Ticketmaster Scraper (`workers/scrapers/ticketmaster.ts`)
+
+```typescript
+import axios from 'axios';
+
+const TM_BASE = 'https://app.ticketmaster.com/discovery/v2';
+const API_KEY = process.env.TICKETMASTER_API_KEY!;
+
+const TM_LOCATIONS = [
+  { city: 'Lagos', countryCode: 'NG', dbCity: 'Lagos', country: 'NG' },
+  { city: 'London', countryCode: 'GB', dbCity: 'London', country: 'GB' },
+  { city: 'Manchester', countryCode: 'GB', dbCity: 'Manchester', country: 'GB' },
+  { city: 'Birmingham', countryCode: 'GB', dbCity: 'Birmingham', country: 'GB' },
+  // ... add all UK cities
+];
+
+export async function runTicketmasterScraper() {
+  let total = 0;
+  for (const loc of TM_LOCATIONS) {
+    let page = 0;
+    let hasMore = true;
+    while (hasMore) {
+      const res = await axios.get(`${TM_BASE}/events.json`, {
+        params: { apikey: API_KEY, city: loc.city, countryCode: loc.countryCode, size: 200, page },
+        timeout: 10000,
+      });
+
+      const embedded = res.data?._embedded?.events ?? [];
+      if (embedded.length === 0) { hasMore = false; break; }
+
+      const parsed = embedded.map((e: any) => {
+        const venue = e._embedded?.venues?.[0];
+        if (!venue?.location?.latitude) return null;
+        return {
+          externalId: e.id,
+          source: 'ticketmaster',
+          title: e.name,
+          venueName: venue.name,
+          venueAddress: `${venue.address?.line1}, ${venue.city?.name}`,
+          venueLat: parseFloat(venue.location.latitude),
+          venueLng: parseFloat(venue.location.longitude),
+          city: loc.dbCity,
+          country: loc.country,
+          startTime: new Date(e.dates?.start?.dateTime ?? e.dates?.start?.localDate),
+          expectedAttendance: 500,
+          category: e.classifications?.[0]?.segment?.name ?? null,
+          imageUrl: e.images?.[0]?.url ?? null,
+          eventUrl: e.url ?? null,
+          rawData: e,
+          updatedAt: new Date(),
+        };
+      }).filter(Boolean);
+
+      if (parsed.length > 0) {
+        await db.insert(eventsTable).values(parsed as any[]).onConflictDoUpdate({
+          target: [eventsTable.source, eventsTable.externalId],
+          set: { updatedAt: new Date() },
+        });
+        total += parsed.length;
+      }
+
+      page++;
+      if (res.data?.page?.totalPages && page >= res.data.page.totalPages) hasMore = false;
+      await new Promise(r => setTimeout(r, 200));
+    }
+  }
+  return total;
+}
+```
+
+### 3.6 Meetup Scraper (`workers/scrapers/meetup.ts`)
+
+```typescript
+// Meetup GraphQL API (no key required for public events)
+import axios from 'axios';
+
+const MEETUP_GQL = 'https://api.meetup.com/gql';
+
+const MEETUP_CITIES = [
+  { lat: 6.5244, lng: 3.3792, city: 'Lagos', country: 'NG' },
+  { lat: 51.5074, lng: -0.1278, city: 'London', country: 'GB' },
+  // add all target cities
+];
+
+const QUERY = `
+  query($lat: Float!, $lon: Float!, $radius: Int!, $cursor: String) {
+    keywordSearch(
+      filter: { lat: $lat, lon: $lon, radius: $radius }
+      input: { first: 100, after: $cursor }
+    ) {
+      pageInfo { hasNextPage endCursor }
+      edges {
+        node {
+          result {
+            ... on Event {
+              id title eventUrl dateTime endTime
+              venue { name lat lng address city }
+              group { name }
+              going
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+export async function runMeetupScraper() {
+  let total = 0;
+  for (const loc of MEETUP_CITIES) {
+    let cursor: string | null = null;
+    let hasMore = true;
+    while (hasMore) {
+      const res = await axios.post(MEETUP_GQL, {
+        query: QUERY,
+        variables: { lat: loc.lat, lon: loc.lng, radius: 80, cursor },
+      }, { timeout: 15000 });
+
+      const data = res.data?.data?.keywordSearch;
+      if (!data) break;
+      const events = data.edges.map((e: any) => e.node.result).filter((e: any) => e?.venue?.lat);
+
+      const parsed = events.map((e: any) => ({
+        externalId: e.id,
+        source: 'meetup',
+        title: e.title,
+        venueName: e.venue?.name,
+        venueAddress: `${e.venue?.address}, ${e.venue?.city}`,
+        venueLat: e.venue.lat,
+        venueLng: e.venue.lng,
+        city: loc.city,
+        country: loc.country,
+        startTime: new Date(e.dateTime),
+        endTime: e.endTime ? new Date(e.endTime) : null,
+        expectedAttendance: e.going ?? 50,
+        eventUrl: e.eventUrl,
+        rawData: e,
+        updatedAt: new Date(),
+      }));
+
+      if (parsed.length > 0) {
+        await db.insert(eventsTable).values(parsed).onConflictDoUpdate({
+          target: [eventsTable.source, eventsTable.externalId],
+          set: { updatedAt: new Date() },
+        });
+        total += parsed.length;
+      }
+
+      hasMore = data.pageInfo.hasNextPage;
+      cursor = data.pageInfo.endCursor;
+      await new Promise(r => setTimeout(r, 300));
+    }
+  }
+  return total;
+}
+```
+
+### 3.7 Google Events Scraper (`workers/scrapers/google-events.ts`)
+
+```typescript
+// Scrapes Google search results for "events in [city] today/this week"
+// Uses cheerio to parse HTML — no API key needed
+import axios from 'axios';
+import * as cheerio from 'cheerio';
+
+const QUERIES = [
+  'events in Lagos today', 'events in Lagos this weekend',
+  'events in London today', 'events in London this week',
+  'events in Manchester today', 'events in Birmingham today',
+  // etc.
+];
+
+const GOOGLE_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+  'Accept-Language': 'en-US,en;q=0.9',
+};
+
+export async function runGoogleEventsScraper() {
+  let total = 0;
+  for (const query of QUERIES) {
+    try {
+      const res = await axios.get('https://www.google.com/search', {
+        params: { q: query, tbm: 'eventsearch' },
+        headers: GOOGLE_HEADERS,
+        timeout: 10000,
+      });
+      // Parse the events from Google's structured data
+      const $ = cheerio.load(res.data);
+      // Google embeds JSON-LD with event data
+      $('script[type="application/ld+json"]').each((_, el) => {
+        try {
+          const json = JSON.parse($(el).html() ?? '{}');
+          const items = Array.isArray(json) ? json : [json];
+          for (const item of items) {
+            if (item['@type'] === 'Event' && item.location?.geo) {
+              // Parse and upsert to DB (similar to above)
+              // externalId: hash of title + startDate
+              // venueLat/Lng from item.location.geo.latitude/longitude
+              total++;
+            }
+          }
+        } catch {}
+      });
+      await new Promise(r => setTimeout(r, 1000 + Math.random() * 1000));
+    } catch (err) {
+      console.warn(`Google events scrape failed for "${query}"`);
+    }
+  }
+  return total;
+}
+```
+
+### 3.8 Nairaland Scraper (`workers/scrapers/nairaland.ts`)
+
+```typescript
+import axios from 'axios';
+import * as cheerio from 'cheerio';
+
+// Nairaland Events section — scrape posts that mention events + extract locations
+export async function runNairalandScraper() {
+  const BASE = 'https://www.nairaland.com';
+  let total = 0;
+  let page = 0;
+
+  while (page < 50) { // 50 pages × 20 threads = 1000 threads to check
+    const res = await axios.get(`${BASE}/events/${page}`, {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      timeout: 10000,
+    });
+    const $ = cheerio.load(res.data);
+
+    $('tr.highlighted, tr.odd, tr.even').each((_, row) => {
+      const titleEl = $(row).find('a[href*="/"]').first();
+      const title = titleEl.text().trim();
+      if (!title) return;
+
+      // Extract date and location from title/snippet using regex
+      // Store events with venueLat/Lng defaulting to Lagos centre if no geo
+      // This source supplements volume; location precision is lower
+      // Only store if title contains location keywords
+      const lagosKeywords = ['Lagos', 'Lekki', 'Victoria Island', 'Ikeja', 'Surulere', 'Yaba'];
+      if (lagosKeywords.some(k => title.includes(k))) {
+        // Parse and insert with approximate Lagos coordinates
+        total++;
+      }
+    });
+
+    page++;
+    await new Promise(r => setTimeout(r, 1000));
+  }
+  return total;
+}
+```
+
+### 3.9 Facebook Events Scraper (`workers/scrapers/facebook-events.ts`)
+
+```typescript
+// Facebook is the hardest to scrape — use Playwright with stealth plugin
+// Only scrape public event search pages (no login required for public events)
+import { chromium } from 'playwright';
+
+export async function runFacebookEventsScraper() {
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+    viewport: { width: 1280, height: 720 },
+    locale: 'en-GB',
+  });
+
+  let total = 0;
+  const searchQueries = [
+    'https://www.facebook.com/events/search/?q=Lagos&filters=',
+    'https://www.facebook.com/events/search/?q=London+event&filters=',
+    'https://www.facebook.com/events/search/?q=Manchester+event&filters=',
+  ];
+
+  for (const url of searchQueries) {
+    try {
+      const page = await context.newPage();
+      await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
+
+      // Scroll to load more events
+      for (let i = 0; i < 5; i++) {
+        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+        await page.waitForTimeout(1500);
+      }
+
+      // Parse event cards from the page
+      const events = await page.evaluate(() => {
+        const cards = document.querySelectorAll('[data-testid="event_card"], [role="article"]');
+        return Array.from(cards).map(card => ({
+          title: card.querySelector('h2, h3, strong')?.textContent?.trim() ?? '',
+          date: card.querySelector('[data-key="event_time"], time')?.textContent?.trim() ?? '',
+          location: card.querySelector('[data-key="event_venue"]')?.textContent?.trim() ?? '',
+          url: (card.querySelector('a') as HTMLAnchorElement)?.href ?? '',
+        })).filter(e => e.title);
+      });
+
+      // For each event URL, fetch details to get geo coordinates
+      // (geocode venue address using Google Geocoding API)
+      total += events.length;
+      await page.close();
+    } catch (err) {
+      console.warn('Facebook scrape error:', err);
+    }
+    await new Promise(r => setTimeout(r, 3000 + Math.random() * 2000));
+  }
+
+  await browser.close();
+  return total;
+}
+```
+
+---
+
+## SECTION 4 — Restaurant Cluster Engine
+
+### `workers/restaurant-clusters.ts`
+
+```typescript
+import { Client, PlaceType2 } from '@googlemaps/google-maps-services-js';
+import { db } from '@workspace/db';
+import { restaurantClustersTable } from '@workspace/db/schema';
+
+const gmaps = new Client({});
+const KEY = process.env.GOOGLE_PLACES_API_KEY!;
+
+const CLUSTER_SEED_POINTS = [
+  // Lagos
+  { lat: 6.4281, lng: 3.4219, city: 'Lagos', country: 'NG' },
+  { lat: 6.6018, lng: 3.3515, city: 'Lagos', country: 'NG' },
+  { lat: 6.439, lng: 3.474, city: 'Lagos', country: 'NG' },
+  { lat: 6.5006, lng: 3.3544, city: 'Lagos', country: 'NG' },
+  { lat: 6.5158, lng: 3.3794, city: 'Lagos', country: 'NG' },
+  { lat: 6.4535, lng: 3.389, city: 'Lagos', country: 'NG' },
+  // London
+  { lat: 51.5155, lng: -0.0922, city: 'London', country: 'GB' }, // Shoreditch
+  { lat: 51.5033, lng: -0.1195, city: 'London', country: 'GB' }, // South Bank
+  { lat: 51.4994, lng: -0.1768, city: 'London', country: 'GB' }, // South Kensington
+  { lat: 51.5137, lng: -0.1564, city: 'London', country: 'GB' }, // Soho
+  { lat: 51.5196, lng: -0.0886, city: 'London', country: 'GB' }, // Bethnal Green
+  // Manchester, Birmingham, etc. — add grid of seed points for each city
+];
+
+export async function refreshRestaurantClusters() {
+  for (const seed of CLUSTER_SEED_POINTS) {
+    let restaurants: any[] = [];
+    let pageToken: string | undefined;
+
+    // Paginate through up to 3 pages (60 restaurants per cluster seed)
+    do {
+      const res = await gmaps.placesNearby({
+        params: {
+          location: { lat: seed.lat, lng: seed.lng },
+          radius: 1000,
+          type: PlaceType2.restaurant,
+          key: KEY,
+          ...(pageToken ? { pagetoken: pageToken } : {}),
+        },
+      });
+
+      restaurants.push(...res.data.results);
+      pageToken = res.data.next_page_token;
+      if (pageToken) await new Promise(r => setTimeout(r, 2000)); // required delay
+    } while (pageToken && restaurants.length < 60);
+
+    if (restaurants.length === 0) continue;
+
+    const avgLat = restaurants.reduce((s, r) => s + r.geometry.location.lat, 0) / restaurants.length;
+    const avgLng = restaurants.reduce((s, r) => s + r.geometry.location.lng, 0) / restaurants.length;
+    const densityScore = Math.min(100, Math.round((restaurants.length / 60) * 100));
+
+    const topRestaurants = restaurants
+      .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0))
+      .slice(0, 5)
+      .map(r => ({ name: r.name, rating: r.rating, cuisine: r.types?.[0] }));
+
+    // Name the cluster after the dominant restaurant area
+    const clusterName = `${restaurants[0]?.vicinity?.split(',').pop()?.trim() ?? seed.city} Restaurant Hub`;
+
+    await db.insert(restaurantClustersTable).values({
+      name: clusterName,
+      lat: avgLat,
+      lng: avgLng,
+      radius: 800,
+      restaurantCount: restaurants.length,
+      densityScore,
+      city: seed.city,
+      country: seed.country,
+      topRestaurants,
+      updatedAt: new Date(),
+    }).onConflictDoUpdate({
+      target: restaurantClustersTable.id,
+      set: { densityScore, restaurantCount: restaurants.length, updatedAt: new Date() },
+    });
+
+    await new Promise(r => setTimeout(r, 200));
+  }
+}
+```
+
+---
+
+## SECTION 5 — Hotspot Recalculation Engine
+
+### `workers/hotspot-engine.ts`
+
+```typescript
+import { db } from '@workspace/db';
+import { eventsTable, hotspotsTable, restaurantClustersTable } from '@workspace/db/schema';
+import { and, gte, lte, eq, sql } from 'drizzle-orm';
+import { broadcastHotspotUpdate } from '../sse';
+
+const CLUSTER_RADIUS_DEGREES = 0.01; // ~1.1km for grouping events
+
+interface EventRow {
+  venueLat: number;
+  venueLng: number;
+  title: string;
+  expectedAttendance: number;
+  startTime: Date;
+  endTime: Date | null;
+  id: string;
+}
+
+function groupByProximity(events: EventRow[], radiusDeg = CLUSTER_RADIUS_DEGREES) {
+  const clusters: EventRow[][] = [];
+  const used = new Set<number>();
+
+  for (let i = 0; i < events.length; i++) {
+    if (used.has(i)) continue;
+    const cluster = [events[i]];
+    used.add(i);
+    for (let j = i + 1; j < events.length; j++) {
+      if (used.has(j)) continue;
+      const dlat = Math.abs(events[i].venueLat - events[j].venueLat);
+      const dlng = Math.abs(events[i].venueLng - events[j].venueLng);
+      if (dlat < radiusDeg && dlng < radiusDeg) {
+        cluster.push(events[j]);
+        used.add(j);
+      }
+    }
+    clusters.push(cluster);
+  }
+  return clusters;
+}
+
+function scoreCluster(events: EventRow[]): number {
+  const now = Date.now();
+  let score = 0;
+  for (const e of events) {
+    const hoursUntil = (e.startTime.getTime() - now) / 3_600_000;
+    const timeWeight = hoursUntil < 0 ? 1.0 // event happening now
+      : hoursUntil < 1 ? 0.95
+      : hoursUntil < 2 ? 0.80
+      : hoursUntil < 4 ? 0.60
+      : hoursUntil < 8 ? 0.35
+      : 0.15;
+    score += Math.min(e.expectedAttendance, 5000) * timeWeight;
+  }
+  return Math.min(100, Math.round(score / 200));
+}
+
+export async function recalculateTaxiHotspots() {
+  const now = new Date();
+  const window_end = new Date(now.getTime() + 8 * 3_600_000); // next 8 hours
+
+  // Fetch active + upcoming events
+  const events = await db.select().from(eventsTable).where(
+    and(
+      gte(eventsTable.startTime, new Date(now.getTime() - 2 * 3_600_000)), // started up to 2h ago
+      lte(eventsTable.startTime, window_end),
+    )
+  );
+
+  if (events.length === 0) return;
+
+  const clusters = groupByProximity(events);
+
+  // Deactivate old hotspots
+  await db.update(hotspotsTable).set({ isActive: false }).where(eq(hotspotsTable.category, 'taxi'));
+
+  for (const cluster of clusters) {
+    if (cluster.length === 0) continue;
+    const avgLat = cluster.reduce((s, e) => s + e.venueLat, 0) / cluster.length;
+    const avgLng = cluster.reduce((s, e) => s + e.venueLng, 0) / cluster.length;
+    const score = scoreCluster(cluster);
+    if (score < 10) continue; // ignore very low demand clusters
+
+    const topEvent = cluster.sort((a, b) => b.expectedAttendance - a.expectedAttendance)[0];
+    const country = events[0].country;
+    const city = events[0].city;
+
+    const expiry = new Date(Math.max(...cluster.map(e => e.endTime?.getTime() ?? e.startTime.getTime() + 3_600_000)));
+
+    await db.insert(hotspotsTable).values({
+      name: topEvent.title.length > 40 ? topEvent.title.slice(0, 37) + '…' : topEvent.title,
+      lat: avgLat,
+      lng: avgLng,
+      radius: 600 + cluster.length * 50,
+      intensityScore: score,
+      category: 'taxi',
+      city,
+      country,
+      driverSaturation: score > 75 ? 'LOW' : score > 50 ? 'MEDIUM' : 'HIGH',
+      demandRequests: score > 75 ? 'HIGH' : score > 40 ? 'MEDIUM' : 'LOW',
+      demandLabel: score > 75 ? 'Very high demand expected' : score > 40 ? 'Demand increase likely' : 'Moderate demand',
+      driveTimeMinutes: 10,
+      distanceKm: 5,
+      timeStart: topEvent.startTime.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+      timeEnd: topEvent.endTime?.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) ?? '',
+      activeEvents: cluster.slice(0, 5).map(e => ({ id: e.id, title: e.title, startTime: e.startTime })),
+      expiryTimestamp: expiry,
+      isActive: true,
+      updatedAt: new Date(),
+    }).onConflictDoNothing();
+  }
+}
+
+export async function recalculateDeliveryHotspots() {
+  const clusters = await db.select().from(restaurantClustersTable);
+
+  await db.update(hotspotsTable).set({ isActive: false }).where(eq(hotspotsTable.category, 'delivery'));
+
+  for (const cluster of clusters) {
+    const score = cluster.densityScore;
+    if (score < 10) continue;
+
+    await db.insert(hotspotsTable).values({
+      name: cluster.name,
+      lat: cluster.lat,
+      lng: cluster.lng,
+      radius: cluster.radius,
+      intensityScore: score,
+      category: 'delivery',
+      city: cluster.city,
+      country: cluster.country,
+      driverSaturation: score > 75 ? 'LOW' : 'MEDIUM',
+      demandRequests: score > 60 ? 'HIGH' : 'MEDIUM',
+      demandLabel: `${cluster.restaurantCount} restaurants in this area`,
+      driveTimeMinutes: 8,
+      distanceKm: 4,
+      activeEvents: cluster.topRestaurants ?? [],
+      isActive: true,
+      updatedAt: new Date(),
+    }).onConflictDoNothing();
+  }
+}
+
+export async function runHotspotRecalculation() {
+  await Promise.all([recalculateTaxiHotspots(), recalculateDeliveryHotspots()]);
+  // Broadcast updated hotspots to all SSE clients
+  const hotspots = await db.select().from(hotspotsTable).where(eq(hotspotsTable.isActive, true));
+  broadcastHotspotUpdate(hotspots);
+}
+```
+
+---
+
+## SECTION 6 — Cron Scheduler
+
+### `queues/scheduler.ts`
+
+```typescript
+import cron from 'node-cron';
+import { scraperQueue, hotspotQueue } from './index';
+
+export function startScheduler() {
+  // Eventbrite — every 30 minutes (continuous accumulation)
+  cron.schedule('*/30 * * * *', () => scraperQueue.add('eventbrite', {}));
+
+  // Ticketmaster — every hour
+  cron.schedule('5 * * * *', () => scraperQueue.add('ticketmaster', {}));
+
+  // Meetup — every hour
+  cron.schedule('15 * * * *', () => scraperQueue.add('meetup', {}));
+
+  // Google Events — every 2 hours
+  cron.schedule('0 */2 * * *', () => scraperQueue.add('google-events', {}));
+
+  // Nairaland — every 2 hours
+  cron.schedule('30 */2 * * *', () => scraperQueue.add('nairaland', {}));
+
+  // Facebook — every 4 hours (heavy, uses Playwright)
+  cron.schedule('0 */4 * * *', () => scraperQueue.add('facebook-events', {}));
+
+  // Restaurant clusters — every 24 hours (Google Places data is stable)
+  cron.schedule('0 3 * * *', () => scraperQueue.add('restaurant-clusters', {}));
+
+  // Hotspot recalculation — every 5 minutes
+  cron.schedule('*/5 * * * *', () => hotspotQueue.add('recalculate', {}));
+
+  console.log('[Scheduler] All cron jobs started');
+}
+```
+
+### `workers/index.ts`
+
+```typescript
+import { Worker } from 'bullmq';
+import { redisConnection } from '../queues';
+import { runEventbriteScraper } from './scrapers/eventbrite';
+import { runTicketmasterScraper } from './scrapers/ticketmaster';
+import { runMeetupScraper } from './scrapers/meetup';
+import { runGoogleEventsScraper } from './scrapers/google-events';
+import { runNairalandScraper } from './scrapers/nairaland';
+import { runFacebookEventsScraper } from './scrapers/facebook-events';
+import { refreshRestaurantClusters } from './restaurant-clusters';
+import { runHotspotRecalculation } from './hotspot-engine';
+
+export function startWorkers() {
+  const scraperWorker = new Worker('scraper', async (job) => {
+    const scrapers: Record<string, () => Promise<any>> = {
+      'eventbrite': runEventbriteScraper,
+      'ticketmaster': runTicketmasterScraper,
+      'meetup': runMeetupScraper,
+      'google-events': runGoogleEventsScraper,
+      'nairaland': runNairalandScraper,
+      'facebook-events': runFacebookEventsScraper,
+      'restaurant-clusters': refreshRestaurantClusters,
+    };
+    const fn = scrapers[job.name];
+    if (!fn) throw new Error(`Unknown scraper: ${job.name}`);
+    const count = await fn();
+    console.log(`[Worker] ${job.name} scraped ${count} items`);
+    return count;
+  }, { connection: redisConnection, concurrency: 3 });
+
+  const hotspotWorker = new Worker('hotspot', async () => {
+    await runHotspotRecalculation();
+  }, { connection: redisConnection, concurrency: 1 });
+
+  scraperWorker.on('failed', (job, err) => console.error(`[Worker] ${job?.name} failed:`, err.message));
+  hotspotWorker.on('failed', (job, err) => console.error(`[Worker] hotspot failed:`, err.message));
+
+  console.log('[Workers] Scraper and hotspot workers started');
+}
+```
+
+---
+
+## SECTION 7 — Server-Sent Events (SSE)
+
+### `sse/index.ts`
+
+```typescript
+import { Response } from 'express';
+
+const clients = new Set<Response>();
+
+export function addSSEClient(res: Response) {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // Railway nginx fix
+  res.flushHeaders();
+
+  // Keep-alive ping every 30s
+  const ping = setInterval(() => res.write(': ping\n\n'), 30_000);
+
+  clients.add(res);
+  res.on('close', () => { clearInterval(ping); clients.delete(res); });
+}
+
+export function broadcastHotspotUpdate(hotspots: any[]) {
+  const payload = JSON.stringify({ type: 'hotspots_update', data: hotspots, ts: Date.now() });
+  for (const client of clients) {
+    client.write(`data: ${payload}\n\n`);
+  }
+}
+```
+
+### Add SSE route to `routes/hotspots.ts`
+
+```typescript
+// GET /api/hotspots/stream — SSE subscription
+router.get('/stream', requireAuth, (req: AuthRequest, res) => {
+  addSSEClient(res);
+  // Send current hotspots immediately on connect
+  db.select().from(hotspotsTable)
+    .where(eq(hotspotsTable.isActive, true))
+    .then(hotspots => {
+      res.write(`data: ${JSON.stringify({ type: 'hotspots_update', data: hotspots, ts: Date.now() })}\n\n`);
+    });
+});
+
+// GET /api/hotspots — HTTP fallback (existing route, now DB-backed)
+router.get('/', requireAuth, async (_req: AuthRequest, res) => {
+  const hotspots = await db.select().from(hotspotsTable)
+    .where(eq(hotspotsTable.isActive, true));
+  res.json({ success: true, data: hotspots });
+});
+```
+
+---
+
+## SECTION 8 — Flutterwave Payment Integration
+
+### `routes/payments.ts` (new file)
+
+```typescript
+import { Router } from 'express';
+import Flutterwave from 'flutterwave-node-v3';
+import crypto from 'crypto';
+import { db } from '@workspace/db';
+import { paymentTransactionsTable, usersTable } from '@workspace/db/schema';
+import { eq } from 'drizzle-orm';
+import { requireAuth, type AuthRequest } from '../middlewares/auth';
+
+const router = Router();
+const flw = new Flutterwave(
+  process.env.FLUTTERWAVE_PUBLIC_KEY!,
+  process.env.FLUTTERWAVE_SECRET_KEY!
+);
+
+const PLANS = {
+  pro:   { name: 'Pro Plan', amount: 4900,  currency: 'NGN', durationDays: 30 },
+  fleet: { name: 'Fleet Plan', amount: 18000, currency: 'NGN', durationDays: 30 },
+};
+
+// POST /api/payments/initialize
+router.post('/initialize', requireAuth, async (req: AuthRequest, res) => {
+  const { planId } = req.body as { planId: 'pro' | 'fleet' };
+  const plan = PLANS[planId];
+  if (!plan) {
+    res.status(400).json({ success: false, error: { code: 'INVALID_PLAN', message: 'Unknown plan' } });
+    return;
+  }
+
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.userId!)).limit(1);
+  if (!user) { res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found' } }); return; }
+
+  // Generate unique transaction reference
+  const txRef = `RS-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+
+  // Store pending transaction (links txRef → driverId)
+  await db.insert(paymentTransactionsTable).values({
+    driverId: user.id,
+    flwReference: txRef, // will be updated with FLW's ref on webhook
+    txRef,
+    plan: planId,
+    amount: plan.amount,
+    currency: plan.currency,
+    status: 'pending',
+  });
+
+  // Create Flutterwave payment link
+  const payload = {
+    tx_ref: txRef,
+    amount: plan.amount,
+    currency: plan.currency,
+    redirect_url: `${process.env.APP_BASE_URL ?? 'https://ridespot-production-8e87.up.railway.app'}/api/payments/callback`,
+    customer: { email: user.email, name: user.fullName },
+    customizations: { title: 'RideSpot', description: plan.name, logo: '' },
+    meta: { driverId: user.id, plan: planId },
+  };
+
+  const response = await flw.Charge.initiate_payment(payload);
+
+  if (response.status !== 'success') {
+    res.status(502).json({ success: false, error: { code: 'FLW_ERROR', message: response.message } });
+    return;
+  }
+
+  res.json({ success: true, data: { paymentUrl: response.data.link, reference: txRef } });
+});
+
+// POST /api/payments/webhook — Flutterwave sends this on payment completion
+router.post('/webhook', async (req, res) => {
+  const hash = req.headers['verif-hash'];
+  if (hash !== process.env.FLUTTERWAVE_WEBHOOK_SECRET) {
+    res.status(401).json({ error: 'Invalid webhook signature' });
+    return;
+  }
+
+  const { event, data } = req.body;
+  if (event !== 'charge.completed' || data.status !== 'successful') {
+    res.json({ received: true }); // acknowledge but ignore
+    return;
+  }
+
+  const txRef = data.tx_ref;
+
+  // Find pending transaction
+  const [tx] = await db.select().from(paymentTransactionsTable)
+    .where(eq(paymentTransactionsTable.txRef, txRef)).limit(1);
+
+  if (!tx || tx.status === 'successful') {
+    res.json({ received: true }); // idempotent
+    return;
+  }
+
+  // Mark transaction successful
+  await db.update(paymentTransactionsTable).set({
+    flwReference: data.flw_ref,
+    status: 'successful',
+    webhookPayload: data,
+    updatedAt: new Date(),
+  }).where(eq(paymentTransactionsTable.txRef, txRef));
+
+  // Upgrade driver's subscription
+  const expiresAt = new Date(Date.now() + 30 * 24 * 3_600_000); // 30 days
+  await db.update(usersTable).set({
+    subscriptionPlan: tx.plan,
+    subscriptionExpiresAt: expiresAt,
+    updatedAt: new Date(),
+  }).where(eq(usersTable.id, tx.driverId));
+
+  console.log(`[Payment] Driver ${tx.driverId} upgraded to ${tx.plan}`);
+  res.json({ received: true });
+});
+
+// GET /api/payments/callback — Flutterwave redirect after payment (deep-link back to app)
+router.get('/callback', async (req, res) => {
+  const { tx_ref, status } = req.query;
+  // Redirect to the app's deep link so the mobile app can refresh subscription
+  const deepLink = status === 'successful'
+    ? `ridespot://payment/success?ref=${tx_ref}`
+    : `ridespot://payment/failed?ref=${tx_ref}`;
+  res.redirect(deepLink);
+});
+
+export default router;
+```
+
+### Register in `routes/index.ts`
+
+```typescript
+import paymentsRouter from './payments';
+// ...
+router.use('/payments', paymentsRouter);
+```
+
+---
+
+## SECTION 9 — Mobile App Changes
+
+### 9.1 Wire up SSE in `services/api.ts`
+
+```typescript
+// Add to driverApi:
+subscribeToHotspots: (onUpdate: (hotspots: Hotspot[]) => void): (() => void) => {
+  const controller = new AbortController();
+  let retryTimeout: NodeJS.Timeout;
+
+  const connect = async () => {
+    const token = await getToken();
+    const res = await fetch(`${BASE_URL}/api/hotspots/stream`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal,
+    });
+    if (!res.ok || !res.body) throw new Error('SSE connection failed');
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n\n');
+      buffer = lines.pop() ?? '';
+      for (const chunk of lines) {
+        const dataLine = chunk.split('\n').find(l => l.startsWith('data: '));
+        if (!dataLine) continue;
+        try {
+          const msg = JSON.parse(dataLine.slice(6));
+          if (msg.type === 'hotspots_update') onUpdate(msg.data);
+        } catch {}
+      }
+    }
+  };
+
+  const run = () => connect().catch(() => {
+    if (!controller.signal.aborted) {
+      retryTimeout = setTimeout(run, 5000); // retry after 5s
+    }
+  });
+
+  run();
+  return () => { controller.abort(); clearTimeout(retryTimeout); };
+},
+```
+
+### 9.2 Use SSE in `app/(tabs)/taxi.tsx` and `app/(tabs)/delivery.tsx`
+
+Replace the TanStack Query `useQuery` with an SSE subscription:
+
+```typescript
+const [hotspots, setHotspots] = useState<Hotspot[]>([]);
+const [isLoading, setIsLoading] = useState(true);
+
+useEffect(() => {
+  setIsLoading(true);
+  // Initial HTTP fetch for instant display
+  hotspotApi.getAll().then(data => {
+    setHotspots(data.filter(h => h.category === 'taxi')); // or 'delivery'
+    setIsLoading(false);
+  }).catch(() => setIsLoading(false));
+
+  // Subscribe to real-time updates via SSE
+  const unsubscribe = driverApi.subscribeToHotspots((all) => {
+    setHotspots(all.filter(h => h.category === 'taxi')); // or 'delivery'
+  });
+
+  return unsubscribe;
+}, []);
+```
+
+### 9.3 Wire up Payment in `app/subscription.tsx`
+
+```typescript
+import { Linking } from 'react-native';
+import { paymentApi } from '@/services/api';
+
+const handleSubscribe = async () => {
+  setLoading(true);
+  try {
+    const { paymentUrl } = await paymentApi.initialize(selectedPlan);
+    // Open Flutterwave checkout in the system browser
+    await Linking.openURL(paymentUrl);
+  } catch (err) {
+    Alert.alert('Payment Error', err instanceof Error ? err.message : 'Could not start checkout');
+  } finally {
+    setLoading(false);
+  }
+};
+```
+
+After payment returns via deep link, call `refreshUser()` from `useAuth()` to update subscription status.
+
+### 9.4 Handle Payment Deep Link in `app/_layout.tsx`
+
+```typescript
+import { Linking } from 'react-native';
+import { useAuth } from '@/contexts/AuthContext';
+
+// Inside the root layout component:
+const { refreshUser } = useAuth();
+
+useEffect(() => {
+  const sub = Linking.addEventListener('url', ({ url }) => {
+    if (url.includes('ridespot://payment/success')) {
+      refreshUser(); // re-fetch profile to get updated subscriptionPlan
+    }
+  });
+  return () => sub.remove();
+}, []);
+```
+
+---
+
+## SECTION 10 — Entry Point Updates
+
+### `artifacts/api-server/src/index.ts`
+
+Modify the server startup to also launch workers and scheduler:
+
+```typescript
+import { startWorkers } from './workers';
+import { startScheduler } from './queues/scheduler';
+import { scraperQueue, hotspotQueue } from './queues';
+
+// After server.listen():
+startWorkers();
+startScheduler();
+
+// Seed initial jobs on first boot if queues are empty
+const [scraperCount, hotspotCount] = await Promise.all([
+  scraperQueue.count(),
+  hotspotQueue.count(),
+]);
+if (scraperCount === 0) {
+  await Promise.all([
+    scraperQueue.add('eventbrite', {}),
+    scraperQueue.add('ticketmaster', {}),
+    scraperQueue.add('meetup', {}),
+    scraperQueue.add('restaurant-clusters', {}),
+  ]);
+}
+if (hotspotCount === 0) {
+  await hotspotQueue.add('recalculate', {});
+}
+```
+
+---
+
+## SECTION 11 — Admin / Debug Endpoints (add to `routes/admin.ts`)
+
+Protect with an `ADMIN_SECRET` header check:
+
+```typescript
+// GET /api/admin/scraper-stats — view DB event counts by source
+// POST /api/admin/trigger-scraper?source=eventbrite — manually trigger a scrape
+// GET /api/admin/hotspots/all — see all hotspots including inactive
+// GET /api/admin/queue-status — BullMQ queue lengths
+```
+
+---
+
+## SECTION 12 — Reaching 900k+ Eventbrite Events
+
+This is a data accumulation problem, not a single-run problem. The strategy:
+
+1. **Multiple search dimensions**: For each city, run parallel searches by:
+   - Date range: this week, next week, this month, next month, next 3 months
+   - Category: music, business, food, art, sports, tech, community, charity
+   - This multiplies coverage: 15 cities × 5 date ranges × 8 categories = 600 search axes
+   - Each axis returns up to 400 pages × 50 events = 20,000 events
+   - Total ceiling: 600 × 20,000 = 12 million (deduplicated to actual unique events)
+
+2. **24/7 scraping**: The cron runs every 30 minutes. Over 24 hours = 48 full sweeps. New events are upserted, deleted events are handled by expiry.
+
+3. **Rate limiting / backoff**: If Eventbrite returns a 429, the BullMQ retry logic (exponential backoff) handles it automatically. Use `p-limit` to cap concurrent requests per domain.
+
+4. **Playwright fallback**: If the internal API starts requiring authentication, switch the Eventbrite worker to Playwright with stealth plugin to scrape the web UI.
+
+5. **Storage**: 900k events × ~2KB per row = ~1.8GB of event data. Add a PostgreSQL index on `(source, external_id)` for fast upserts, and `(start_time, is_active)` for hotspot queries. Archive events older than 7 days to keep the active table fast.
+
+---
+
+## Checklist — Verify Everything Works
+
+- [ ] `pnpm drizzle-kit push` runs migrations successfully
+- [ ] Redis connection from Railway env var works (`ioredis` connects)
+- [ ] `POST /api/payments/initialize` returns a `paymentUrl`
+- [ ] Flutterwave checkout opens in mobile browser
+- [ ] Flutterwave webhook `POST /api/payments/webhook` updates `users.subscription_plan`
+- [ ] `GET /api/hotspots` returns DB-backed hotspots (not static array)
+- [ ] `GET /api/hotspots/stream` delivers SSE to mobile app
+- [ ] Eventbrite scraper runs and upserts events to `events` table
+- [ ] Hotspot engine creates `hotspots` rows from scraped events
+- [ ] Delivery hotspots populated from `restaurant_clusters` table
+- [ ] Mobile taxi screen shows real hotspots, updates live via SSE
+- [ ] Mobile delivery screen shows real restaurant cluster hotspots
+- [ ] Mobile edit-profile and change-password use real API
+- [ ] Location tracking sends coordinates to backend every 10s
+
+---
+
+## Notes
+
+- **Eventbrite partner API**: You do not need it. The internal search API used by the Eventbrite website is accessible without a partner key using browser-like headers. If they add additional bot detection, switch to Playwright + stealth plugin (already scaffolded).
+- **Facebook Events**: Facebook actively blocks scraping. The Playwright approach above works for public events but may need a logged-in session cookie for higher volume. Treat it as a supplementary source.
+- **Google Popular Times**: Requires the Google Places API `fields=popular_times` (paid). Use this in the restaurant cluster worker to weight delivery hotspot intensity by time of day.
+- **Playwright on Railway**: Add `playwright` and run `playwright install chromium` in the Railway build command / Dockerfile RUN step.
+- **Subscription gating**: Currently all users have equal access. When you're ready to gate features, check `user.subscriptionPlan` in the hotspot route middleware.

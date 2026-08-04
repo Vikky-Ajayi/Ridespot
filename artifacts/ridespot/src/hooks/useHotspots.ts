@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { DemandLevel } from "@/lib/demandColors";
 import type { Hotspot } from "@/types";
 import { hotspotRepository } from "@/services/repositories";
@@ -8,6 +8,7 @@ import { mapHotspot, type BackendHotspot } from "@/services/repositories/shared"
 import { useHotspotStore } from "@/store/hotspot-store";
 import { useToastStore } from "@/store/toast-store";
 import { useDriverLocation } from "./useDriverLocation";
+import { useSSEHotspots } from "./useSSEHotspots";
 
 function cacheHotspots(hotspots: Hotspot[]) {
   if (typeof window === "undefined") {
@@ -41,6 +42,17 @@ export function useHotspots(filter: "all" | Exclude<DemandLevel, "very-high"> = 
   const getCachedHotspots = useHotspotStore((state) => state.getCachedHotspots);
   const showToast = useToastStore((state) => state.showToast);
   const [loading, setLoading] = useState(true);
+
+  // SSE: receive server-pushed hotspot updates alongside socket.io
+  const handleSSEUpdate = useCallback(
+    (updated: Hotspot[]) => {
+      if (updated.length === 0) return;
+      setHotspots(updated, new Date().toISOString());
+      cacheHotspots(updated);
+    },
+    [setHotspots],
+  );
+  useSSEHotspots(handleSSEUpdate);
 
   useEffect(() => {
     if (!position) {

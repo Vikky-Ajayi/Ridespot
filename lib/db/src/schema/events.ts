@@ -1,0 +1,43 @@
+import {
+  doublePrecision,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+  varchar,
+} from "drizzle-orm/pg-core";
+
+export const eventsTable = pgTable(
+  "events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    externalId: varchar("external_id", { length: 255 }).notNull(),
+    source: varchar("source", { length: 50 }).notNull(),
+    title: text("title").notNull(),
+    venueName: text("venue_name"),
+    venueAddress: text("venue_address"),
+    venueLat: doublePrecision("venue_lat").notNull(),
+    venueLng: doublePrecision("venue_lng").notNull(),
+    city: varchar("city", { length: 100 }).notNull(),
+    country: varchar("country", { length: 10 }).notNull(),
+    startTime: timestamp("start_time", { withTimezone: true }).notNull(),
+    endTime: timestamp("end_time", { withTimezone: true }),
+    expectedAttendance: integer("expected_attendance").default(0),
+    category: varchar("category", { length: 100 }),
+    imageUrl: text("image_url"),
+    eventUrl: text("event_url"),
+    rawData: jsonb("raw_data"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({
+    uniqueSourceId: uniqueIndex("events_source_external_idx").on(t.source, t.externalId),
+    venueLatLngIdx: index("events_venue_latlng_idx").on(t.venueLat, t.venueLng),
+    startTimeIdx: index("events_start_time_idx").on(t.startTime),
+    cityIdx: index("events_city_idx").on(t.city),
+  }),
+);

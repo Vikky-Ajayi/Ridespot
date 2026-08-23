@@ -21,7 +21,8 @@
     "smoke:realtime-cleanup": "node scripts/smoke-realtime-cleanup.mjs",
     "smoke:security": "node scripts/smoke-security.mjs",
     "smoke:socket": "node scripts/smoke-socket.mjs",
-    "smoke:server-e2e": "node scripts/smoke-server-e2e.mjs"
+    "smoke:server-e2e": "node scripts/smoke-server-e2e.mjs",
+    "seed:event-ingestion-tiles": "node scripts/seed-event-ingestion-tiles.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",

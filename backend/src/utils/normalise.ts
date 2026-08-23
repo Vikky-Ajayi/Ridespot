@@ -2,7 +2,7 @@ import { canonicalMarketCountry } from "./country.js";
 
 export interface EventInput {
   externalId: string;
-  source: "ticketmaster" | "eventbrite" | "event_aggregator" | "google_places" | "manual";
+  source: "ticketmaster" | "eventbrite" | "event_aggregator" | "google_places" | "manual" | "restaurant_cluster";
   name: string;
   venueName: string | null;
   lat: number;

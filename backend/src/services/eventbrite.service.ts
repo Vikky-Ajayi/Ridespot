@@ -201,7 +201,10 @@ async function fetchEventbriteOfficialDiscoveryNear(
   const endTime = input.endTime ?? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
   const radiusKm = Math.max(1, Math.ceil(input.radiusMeters / 1000));
 
-  const MAX_PAGES = 3;
+  // Paginate until Eventbrite says there's nothing left (has_more_items = false), instead of
+  // stopping after a handful of pages -- this was the single biggest cap on official-API
+  // volume. The ceiling below is a safety valve, not the real limit.
+  const MAX_PAGES = 200;
   const allRawEvents: Array<Record<string, unknown>> = [];
   const diagnostics: EventSourceDiagnostic[] = [];
 
@@ -301,7 +304,7 @@ function flattenJsonLd(node: unknown): Record<string, unknown>[] {
   return [record, ...graph, ...itemList];
 }
 
-function extractJsonLdEvents(html: string) {
+export function extractJsonLdEvents(html: string) {
   const matches = html.matchAll(
     /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi
   );

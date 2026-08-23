@@ -17,28 +17,53 @@ function calculateDistance(lat1: number, lng1: number, lat2: number, lng2: numbe
   return earthRadiusMeters * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function resolveMarketContext(lat: number, lng: number) {
-  if (lat > 51 && lat < 52 && lng > -1 && lng < 0.5) {
-    return { city: "London", country: "UK", room: "market:london" };
-  }
+// Distance beyond which the "nearest" ingestion tile is too far to be a meaningful market
+// match -- prevents a driver in the middle of nowhere from being silently bucketed into a
+// market a hundred kilometers away just because it happens to be the closest one on record.
+const MARKET_MATCH_RADIUS_METERS = 50000;
 
-  if (lat > 53 && lat < 54 && lng > -3.5 && lng < -1.5) {
-    return { city: "Manchester", country: "UK", room: "market:manchester" };
-  }
+// Was a hardcoded 3-UK-city + 2-Nigeria-city bounding-box check. Now resolves against the
+// same event_ingestion_tiles grid that ingestion uses (see migration 016 / events.service.ts),
+// so a driver anywhere in the ~95-town UK grid (not just London/Manchester/Birmingham) gets
+// bucketed into a real market room and actually receives that market's hotspots:updated
+// broadcasts instead of silently falling through to market:global.
+async function resolveMarketContext(lat: number, lng: number) {
+  try {
+    const result = await query<{
+      label: string;
+      country: "Nigeria" | "UK";
+      distance_meters: string | number;
+    }>(
+      `SELECT label, country,
+              ST_Distance(
+                ST_SetSRID(ST_MakePoint(lng, lat), 4326)::geography,
+                ${geographyPointSql("$2", "$1")}
+              ) AS distance_meters
+       FROM event_ingestion_tiles
+       WHERE is_active = TRUE
+       ORDER BY distance_meters ASC
+       LIMIT 1`,
+      [lat, lng]
+    );
 
-  if (lat > 52 && lat < 53.5 && lng > -2.5 && lng < -1) {
-    return { city: "Birmingham", country: "UK", room: "market:birmingham" };
-  }
+    const nearest = result.rows[0];
+    if (!nearest || Number(nearest.distance_meters) > MARKET_MATCH_RADIUS_METERS) {
+      return { city: null, country: null, room: "market:global" };
+    }
 
-  if (lat > 6 && lat < 7 && lng > 3 && lng < 4.5) {
-    return { city: "Lagos", country: "Nigeria", room: "market:lagos" };
+    const citySlug = nearest.label.toLowerCase().replace(/\s+/g, "-");
+    return { city: nearest.label, country: nearest.country, room: `market:${citySlug}` };
+  } catch (error) {
+    // event_ingestion_tiles may not exist yet (migration not run) -- degrade to global rather
+    // than failing the location update.
+    console.warn(
+      JSON.stringify({
+        event: "resolve_market_context_failed",
+        message: error instanceof Error ? error.message : String(error)
+      })
+    );
+    return { city: null, country: null, room: "market:global" };
   }
-
-  if (lat > 8 && lat < 10 && lng > 7 && lng < 8.5) {
-    return { city: "Abuja", country: "Nigeria", room: "market:abuja" };
-  }
-
-  return { city: null, country: null, room: "market:global" };
 }
 
 export async function handleLocationUpdate(socket: Socket, data: { lat: number; lng: number }) {
@@ -53,7 +78,7 @@ export async function handleLocationUpdate(socket: Socket, data: { lat: number; 
   }
 
   const driverId = driver.sub;
-  const market = resolveMarketContext(data.lat, data.lng);
+  const market = await resolveMarketContext(data.lat, data.lng);
 
   await query(
     `INSERT INTO driver_locations (driver_id, location, is_online, last_seen)

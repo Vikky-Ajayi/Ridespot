@@ -29,9 +29,10 @@ export type GeneratedHotspot = {
   activeTimeStart: string;
   activeTimeEnd: string;
   expiresAt: string;
+  category: "taxi" | "delivery";
 };
 
-async function driversNear(lat: number, lng: number) {
+export async function driversNear(lat: number, lng: number) {
   const result = await query<{ total: string }>(
     `SELECT COUNT(*)::text AS total
      FROM driver_locations
@@ -181,14 +182,14 @@ export async function upsertGeneratedHotspots(hotspots: GeneratedHotspot[]) {
            driver_saturation, ml_confidence, prediction_mode, is_high_confidence,
            operating_confidence_threshold, operating_accuracy_target, fallback_reason,
            routing_decision, insight_text, drivers_needed, active_time_start, active_time_end,
-           generated_at
+           generated_at, category
          ) VALUES (
            $1, $2, $3, $4, ST_SetSRID(ST_MakePoint($6, $5), 4326)::geography, $7,
            $8, $9, $10, NULL, NULL,
            $11, $12, $13, $14,
            $15, $16, $17,
            $18, $19, $20, $21, $22,
-           NOW()
+           NOW(), $23
          )`,
         [
           hotspotId,
@@ -212,7 +213,8 @@ export async function upsertGeneratedHotspots(hotspots: GeneratedHotspot[]) {
           hotspot.insightText,
           hotspot.driversNeeded,
           hotspot.activeTimeStart,
-          hotspot.activeTimeEnd
+          hotspot.activeTimeEnd,
+          hotspot.category
         ]
       );
     }
@@ -271,7 +273,8 @@ export async function generateHotspotsFromEvents(events: ActiveEventRow[]) {
       insightText: prediction.insightText,
       activeTimeStart: event.start_time,
       activeTimeEnd: effectiveEndTime,
-      expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString()
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+      category: "taxi"
     });
   }
 

@@ -8,19 +8,68 @@ import {
   fetchTicketmasterEventsNear
 } from "../../services/ticketmaster.service.js";
 
-const DEFAULT_EVENT_CITIES: Array<{
+interface EventIngestionCity {
   city: string;
   country: "Nigeria" | "UK";
   countryCode: "GB" | "NG";
   lat: number;
   lng: number;
-}> = [
+  radiusMeters?: number;
+}
+
+// Fallback baseline used only if event_ingestion_tiles is empty (e.g. pre-seed, or a fresh
+// environment before scripts/seed-event-ingestion-tiles.mjs has run). The real coverage grid
+// -- UK-wide + Lagos + Abuja -- lives in the DB (see migration 016) precisely so market
+// expansion doesn't require a redeploy.
+const DEFAULT_EVENT_CITIES: EventIngestionCity[] = [
   { city: "Lagos", country: "Nigeria", countryCode: "NG", lat: 6.5244, lng: 3.3792 },
   { city: "Abuja", country: "Nigeria", countryCode: "NG", lat: 9.0765, lng: 7.3986 },
   { city: "London", country: "UK", countryCode: "GB", lat: 51.5072, lng: -0.1276 },
   { city: "Manchester", country: "UK", countryCode: "GB", lat: 53.4808, lng: -2.2426 },
   { city: "Birmingham", country: "UK", countryCode: "GB", lat: 52.4862, lng: -1.8904 }
 ];
+
+interface EventIngestionTileRow {
+  label: string;
+  country: "Nigeria" | "UK";
+  country_code: "GB" | "NG";
+  lat: string | number;
+  lng: string | number;
+  radius_meters: number;
+}
+
+async function loadEventIngestionTiles(): Promise<EventIngestionCity[]> {
+  try {
+    const result = await query<EventIngestionTileRow>(
+      `SELECT label, country, country_code, lat, lng, radius_meters
+       FROM event_ingestion_tiles
+       WHERE is_active = TRUE`
+    );
+
+    if (result.rows.length === 0) {
+      return DEFAULT_EVENT_CITIES;
+    }
+
+    return result.rows.map((row) => ({
+      city: row.label,
+      country: row.country,
+      countryCode: row.country_code,
+      lat: Number(row.lat),
+      lng: Number(row.lng),
+      radiusMeters: row.radius_meters
+    }));
+  } catch (error) {
+    // event_ingestion_tiles may not exist yet (migration not run) -- degrade to the baseline
+    // 5-city list rather than failing the whole ingestion cycle.
+    console.warn(
+      JSON.stringify({
+        event: "event_ingestion_tiles_load_failed",
+        message: error instanceof Error ? error.message : String(error)
+      })
+    );
+    return DEFAULT_EVENT_CITIES;
+  }
+}
 
 export interface ActiveEventRow {
   id: string;
@@ -307,13 +356,13 @@ function prepareEventForStorage(event: EventInput): EventInput | null {
   };
 }
 
-async function upsertEvent(client: PoolClient, input: EventInput) {
+async function upsertEvent(client: PoolClient, input: EventInput): Promise<string | null> {
   const event = prepareEventForStorage(input);
   if (!event) {
-    return false;
+    return null;
   }
 
-  await client.query(
+  const result = await client.query<{ id: string }>(
     `INSERT INTO events (
       external_id, source, name, venue_name, location, address, city, country,
       start_time, end_time, expected_attendance, event_type, event_category,
@@ -337,7 +386,8 @@ async function upsertEvent(client: PoolClient, input: EventInput) {
       source_url = EXCLUDED.source_url,
       estimated_end_time = EXCLUDED.estimated_end_time,
       raw_data = EXCLUDED.raw_data,
-      is_active = TRUE`,
+      is_active = TRUE
+     RETURNING id`,
     [
       event.externalId,
       event.source,
@@ -359,17 +409,18 @@ async function upsertEvent(client: PoolClient, input: EventInput) {
     ]
   );
 
-  return true;
+  return result.rows[0]?.id ?? null;
 }
 
 export const eventsService = {
-  async ingestEvents(cities = DEFAULT_EVENT_CITIES) {
+  async ingestEvents(cities?: EventIngestionCity[]) {
+    const resolvedCities = cities ?? (await loadEventIngestionTiles());
     const ingestionErrors: Array<{ city: string; source: string; message: string }> = [];
     const eventbriteDiagnostics: EventSourceDiagnostic[] = [];
     const refreshWindow = providerRefreshWindow();
     const allEvents = (
       await Promise.all(
-        cities.map(async ({ city, country, countryCode, lat, lng }) => {
+        resolvedCities.map(async ({ city, country, countryCode, lat, lng, radiusMeters }) => {
           const [ticketmasterEvents, eventbriteEvents] = await Promise.all([
             fetchTicketmasterEvents(city, countryCode, refreshWindow).catch((error: unknown) => {
               const message = error instanceof Error ? error.message : String(error);
@@ -379,7 +430,7 @@ export const eventsService = {
             fetchPublicEventbriteEventsNear({
               lat,
               lng,
-              radiusMeters: 15000,
+              radiusMeters: radiusMeters ?? 15000,
               city,
               country,
               ...refreshWindow
@@ -908,5 +959,14 @@ export const eventsService = {
     return {
       feedbackRecords: Number(result.rows[0]?.count ?? 0)
     };
+  },
+
+  // Generic single-event upsert, exposed for pipelines that discover/compute events outside
+  // the batched cities.map() flow above: the restaurant-cluster delivery pipeline (synthetic
+  // "events", source = 'restaurant_cluster') and the Eventbrite sitemap crawler (real events
+  // discovered one detail page at a time, source = 'eventbrite'). Reuses the exact same
+  // upsert/index/pruning machinery as the bulk path.
+  async upsertDiscoveredEvent(input: EventInput): Promise<string | null> {
+    return withTransaction((client) => upsertEvent(client, input));
   }
 };

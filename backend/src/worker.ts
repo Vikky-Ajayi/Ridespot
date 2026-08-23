@@ -3,16 +3,28 @@ import { redis } from "./config/redis.js";
 import { createEventIngestionWorker, ensureEventIngestionSchedule } from "./jobs/eventIngestion.job.js";
 import { createHotspotRefreshWorker, ensureHotspotRefreshSchedule } from "./jobs/hotspotRefresh.job.js";
 import { createMlPredictionWorker } from "./jobs/mlPrediction.job.js";
+import {
+  createRestaurantClusterWorker,
+  ensureRestaurantClusterSchedule
+} from "./jobs/restaurantClusterRefresh.job.js";
+import {
+  createEventbriteSitemapWorker,
+  ensureEventbriteSitemapSchedule
+} from "./jobs/eventbriteSitemapCrawl.job.js";
 
 async function startWorkers() {
   await verifyDatabaseConnection();
   await ensureEventIngestionSchedule();
   await ensureHotspotRefreshSchedule();
+  await ensureRestaurantClusterSchedule();
+  await ensureEventbriteSitemapSchedule();
 
   const workers = [
     createEventIngestionWorker(),
     createHotspotRefreshWorker(),
-    createMlPredictionWorker()
+    createMlPredictionWorker(),
+    createRestaurantClusterWorker(),
+    createEventbriteSitemapWorker()
   ];
 
   const shutdown = async () => {

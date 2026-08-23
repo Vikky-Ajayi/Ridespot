@@ -35,7 +35,8 @@ interface HotspotRow {
   expires_at: string | null;
   city?: string | null;
   country?: string | null;
-  source?: "ticketmaster" | "eventbrite" | "event_aggregator" | "manual" | string | null;
+  category?: "taxi" | "delivery" | null;
+  source?: "ticketmaster" | "eventbrite" | "event_aggregator" | "manual" | "restaurant_cluster" | string | null;
   source_url?: string | null;
   venue_name?: string | null;
   estimated_end_time?: boolean | null;
@@ -45,9 +46,16 @@ interface HotspotRow {
   lng: number;
   distance_meters?: number | string | null;
   drivers_in_zone?: string | number;
+  radius_meters?: number | string | null;
 }
 
-const REAL_HOTSPOT_EVENT_SOURCES = ["ticketmaster", "eventbrite", "event_aggregator", "manual"];
+const REAL_HOTSPOT_EVENT_SOURCES = [
+  "ticketmaster",
+  "eventbrite",
+  "event_aggregator",
+  "manual",
+  "restaurant_cluster"
+];
 const HOTSPOT_TARGET_COUNT = 10;
 const HOTSPOT_RADIUS_STEPS = [15000, 25000, 35000, 50000];
 const LIVE_EVENT_WINDOW = "ending_within_1_hour";
@@ -184,6 +192,7 @@ function mapHotspot(row: HotspotRow, routeEstimate?: RouteEstimate) {
     imageUrl: realEventImageUrl(row.event_raw_data),
     city: row.city ?? null,
     country: row.country ?? null,
+    category: row.category ?? "taxi",
     source: row.source ?? null,
     sourceUrl: row.source_url ?? null,
     venueName: row.venue_name ?? row.name,
@@ -194,7 +203,8 @@ function mapHotspot(row: HotspotRow, routeEstimate?: RouteEstimate) {
       : null,
     generatedAt: row.generated_at,
     expiresAt: row.expires_at,
-    isCovered
+    isCovered,
+    radiusMeters: Number(row.radius_meters ?? 300)
   };
 }
 
@@ -259,7 +269,10 @@ async function queryLiveHotspotRows(input: {
   lng: number;
   radius: number;
   limit: number;
+  category?: "taxi" | "delivery" | null;
 }) {
+  const category = input.category ?? null;
+
   if (input.delayedForFreePlan) {
     return query<HotspotRow>(
       `WITH latest_delayed_snapshots AS (
@@ -287,7 +300,9 @@ async function queryLiveHotspotRows(input: {
            s.generated_at,
            NULL::timestamptz AS expires_at,
            s.event_id,
-           s.location
+           s.location,
+           s.category,
+           s.radius_meters
          FROM hotspot_snapshots s
          JOIN events e ON e.id = s.event_id
          WHERE s.generated_at <= NOW() - INTERVAL '30 minutes'
@@ -296,6 +311,7 @@ async function queryLiveHotspotRows(input: {
            AND s.active_time_end IS NOT NULL
            AND s.active_time_end BETWEEN NOW() AND NOW() + INTERVAL '1 hour'
            AND e.source = ANY($5::text[])
+           AND ($6::text IS NULL OR s.category = $6)
            AND ST_DWithin(s.location, ${geographyPointSql("$2", "$1")}, $3)
          ORDER BY s.hotspot_id, s.generated_at DESC
        ),
@@ -324,7 +340,7 @@ async function queryLiveHotspotRows(input: {
        FROM ranked
        ORDER BY demand_score DESC, distance_meters ASC, active_time_end ASC
        LIMIT $4`,
-      [input.lat, input.lng, input.radius, input.limit, REAL_HOTSPOT_EVENT_SOURCES]
+      [input.lat, input.lng, input.radius, input.limit, REAL_HOTSPOT_EVENT_SOURCES, category]
     );
   }
 
@@ -351,13 +367,14 @@ async function queryLiveHotspotRows(input: {
      WHERE h.is_active = TRUE
        AND h.event_id IS NOT NULL
         AND e.source = ANY($5::text[])
+        AND ($6::text IS NULL OR h.category = $6)
        AND h.active_time_start <= NOW()
        AND h.active_time_end IS NOT NULL
        AND h.active_time_end BETWEEN NOW() AND NOW() + INTERVAL '1 hour'
         AND ST_DWithin(h.location, ${geographyPointSql("$2", "$1")}, $3)
      ORDER BY h.demand_score DESC, distance_meters ASC, h.active_time_end ASC
      LIMIT $4`,
-    [input.lat, input.lng, input.radius, input.limit, REAL_HOTSPOT_EVENT_SOURCES]
+    [input.lat, input.lng, input.radius, input.limit, REAL_HOTSPOT_EVENT_SOURCES, category]
   );
 }
 
@@ -368,6 +385,7 @@ export const hotspotService = {
     radius: number;
     limit: number;
     planTier: PlanTier;
+    category?: "taxi" | "delivery";
   }) {
     const delayedForFreePlan = options.planTier === "free";
     const requestedRadius = Math.min(Math.max(Math.round(options.radius), 1), 50000);
@@ -384,7 +402,8 @@ export const hotspotService = {
       lat: options.lat,
       lng: options.lng,
       radius: requestedRadius,
-      limit: queryLimit
+      limit: queryLimit,
+      category: options.category
     });
 
     for (const radius of radiusSteps.slice(1)) {
@@ -403,7 +422,8 @@ export const hotspotService = {
         lat: options.lat,
         lng: options.lng,
         radius,
-        limit: queryLimit
+        limit: queryLimit,
+        category: options.category
       });
     }
 

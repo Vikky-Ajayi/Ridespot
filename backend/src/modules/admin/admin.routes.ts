@@ -61,4 +61,14 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     { preHandler: adminMiddleware },
     adminController.deleteEvent
   );
+
+  // Force an immediate one-off run of a scheduled job instead of waiting for its next cron
+  // tick -- useful right after a fresh deploy/seed to confirm the pipeline actually works.
+  app.post("/jobs/trigger", { preHandler: adminMiddleware }, adminController.triggerJob);
+  // HTTP-triggered equivalent of `pnpm run seed:event-ingestion-tiles`.
+  app.post(
+    "/jobs/seed-event-tiles",
+    { preHandler: adminMiddleware },
+    adminController.seedEventIngestionTiles
+  );
 }

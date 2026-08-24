@@ -35,3 +35,14 @@ export const adminEventCreateSchema = z.object({
 
 export const adminEventUpdateSchema = adminEventCreateSchema;
 
+export const triggerJobSchema = z.object({
+  job: z.enum([
+    "event-ingestion",
+    "hotspot-refresh",
+    "restaurant-location-refresh",
+    "restaurant-score-refresh",
+    "sitemap-index-refresh",
+    "sitemap-crawl-batch"
+  ])
+});
+

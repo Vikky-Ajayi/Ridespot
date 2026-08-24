@@ -3,7 +3,7 @@ import type { MultipartFile } from "@fastify/multipart";
 import { AppError, sendSuccess } from "../../utils/http.js";
 import { signAdminToken } from "../../utils/adminJwt.js";
 import { extractEventFromFlyer } from "../../services/eventOcr.service.js";
-import { adminEventCreateSchema, adminEventUpdateSchema, adminLoginSchema, listQuerySchema, updateMarketConfigSchema } from "./admin.schema.js";
+import { adminEventCreateSchema, adminEventUpdateSchema, adminLoginSchema, listQuerySchema, triggerJobSchema, updateMarketConfigSchema } from "./admin.schema.js";
 import { adminService } from "./admin.service.js";
 
 export const adminController = {
@@ -110,5 +110,16 @@ export const adminController = {
 
   async deleteEvent(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
     return sendSuccess(reply, await adminService.deleteEvent(request.params.id));
+  },
+
+  async triggerJob(request: FastifyRequest, reply: FastifyReply) {
+    const body = triggerJobSchema.parse(request.body);
+    const result = await adminService.triggerJob(body.job);
+    return sendSuccess(reply, result, { message: `${body.job} enqueued -- the worker will pick it up shortly.` });
+  },
+
+  async seedEventIngestionTiles(_request: FastifyRequest, reply: FastifyReply) {
+    const result = await adminService.seedEventIngestionTiles();
+    return sendSuccess(reply, result, { message: "Event ingestion tile grid seeded." });
   }
 };

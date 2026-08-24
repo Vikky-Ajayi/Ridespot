@@ -1,5 +1,5 @@
 import bcrypt from "bcrypt";
-import { query } from "../../config/database.js";
+import { query, withTransaction } from "../../config/database.js";
 import { redis } from "../../config/redis.js";
 import { getModelHealth, triggerModelRetrain } from "../../services/ml.service.js";
 import { getIntegrationStatuses } from "../../services/integrationHealth.service.js";
@@ -8,6 +8,13 @@ import { geographyPointSql, getHotspotsWithCoverage, selectLatLng } from "../../
 import { AppError } from "../../utils/http.js";
 import { eventsService } from "../events/events.service.js";
 import type { AdminRole } from "../../utils/adminJwt.js";
+import { eventQueue } from "../../jobs/eventIngestion.job.js";
+import { hotspotQueue } from "../../jobs/hotspotRefresh.job.js";
+import { restaurantQueue } from "../../jobs/restaurantClusterRefresh.job.js";
+import { eventbriteSitemapQueue } from "../../jobs/eventbriteSitemapCrawl.job.js";
+import type { triggerJobSchema } from "./admin.schema.js";
+import type { z } from "zod";
+import { EVENT_INGESTION_TILES } from "../../data/eventIngestionTiles.js";
 
 interface AdminRow {
   id: string;
@@ -538,5 +545,74 @@ export const adminService = {
     }
 
     return { id };
+  },
+
+  // Enqueues a one-off run of a scheduled job onto the same BullMQ queue the worker already
+  // listens on (see backend/src/jobs/*.job.ts) -- the running worker picks it up immediately,
+  // no separate trigger mechanism needed. Exists so a fresh deploy doesn't have to sit and
+  // wait for the next natural cron tick (up to 15 min for events, up to a week for the
+  // Monday-only restaurant-location refresh) just to see whether the pipeline works at all.
+  async triggerJob(job: z.infer<typeof triggerJobSchema>["job"]) {
+    switch (job) {
+      case "event-ingestion":
+        await eventQueue.add("market-area-discovery", {});
+        break;
+      case "hotspot-refresh":
+        await hotspotQueue.add("refresh", {});
+        break;
+      case "restaurant-location-refresh":
+        await restaurantQueue.add("restaurant-location-refresh", {});
+        break;
+      case "restaurant-score-refresh":
+        await restaurantQueue.add("restaurant-score-refresh", {});
+        break;
+      case "sitemap-index-refresh":
+        await eventbriteSitemapQueue.add("sitemap-url-refresh", {});
+        break;
+      case "sitemap-crawl-batch":
+        await eventbriteSitemapQueue.add("sitemap-page-crawl", {});
+        break;
+    }
+
+    return { queued: job };
+  },
+
+  // HTTP-triggered equivalent of scripts/seed-event-ingestion-tiles.mjs -- lets the coverage
+  // grid be seeded without CLI/DATABASE_URL access, using the same tile data (see
+  // backend/src/data/eventIngestionTiles.ts).
+  async seedEventIngestionTiles() {
+    let inserted = 0;
+    let updated = 0;
+
+    await withTransaction(async (client) => {
+      for (const tile of EVENT_INGESTION_TILES) {
+        const tileKey = `${tile.countryCode.toLowerCase()}-${tile.label
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")}`;
+
+        const result = await client.query<{ inserted: boolean }>(
+          `INSERT INTO event_ingestion_tiles (tile_key, label, country, country_code, lat, lng, radius_meters, is_active)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE)
+           ON CONFLICT (tile_key) DO UPDATE SET
+             label = EXCLUDED.label,
+             lat = EXCLUDED.lat,
+             lng = EXCLUDED.lng,
+             radius_meters = EXCLUDED.radius_meters,
+             is_active = TRUE
+           RETURNING (xmax = 0) AS inserted`,
+          [tileKey, tile.label, tile.country, tile.countryCode, tile.lat, tile.lng, tile.radiusMeters]
+        );
+
+        if (result.rows[0]?.inserted) {
+          inserted += 1;
+        } else {
+          updated += 1;
+        }
+      }
+    });
+
+    return { totalTiles: EVENT_INGESTION_TILES.length, inserted, updated };
   }
 };

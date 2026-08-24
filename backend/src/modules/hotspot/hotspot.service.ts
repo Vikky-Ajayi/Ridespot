@@ -58,7 +58,7 @@ const REAL_HOTSPOT_EVENT_SOURCES = [
 ];
 const HOTSPOT_TARGET_COUNT = 10;
 const HOTSPOT_RADIUS_STEPS = [15000, 25000, 35000, 50000];
-const LIVE_EVENT_WINDOW = "ending_within_1_hour";
+const LIVE_EVENT_WINDOW = "within_24_hours";
 
 function getRadiusSteps(requestedRadius: number) {
   const requested = Math.min(Math.max(Math.round(requestedRadius), 1), 50000);
@@ -307,9 +307,9 @@ async function queryLiveHotspotRows(input: {
          JOIN events e ON e.id = s.event_id
          WHERE s.generated_at <= NOW() - INTERVAL '30 minutes'
            AND s.generated_at >= NOW() - INTERVAL '24 hours'
-           AND s.active_time_start <= NOW()
+           AND s.active_time_start <= NOW() + INTERVAL '24 hours'
            AND s.active_time_end IS NOT NULL
-           AND s.active_time_end BETWEEN NOW() AND NOW() + INTERVAL '1 hour'
+           AND s.active_time_end >= NOW()
            AND e.source = ANY($5::text[])
            AND ($6::text IS NULL OR s.category = $6)
            AND ST_DWithin(s.location, ${geographyPointSql("$2", "$1")}, $3)
@@ -368,9 +368,9 @@ async function queryLiveHotspotRows(input: {
        AND h.event_id IS NOT NULL
         AND e.source = ANY($5::text[])
         AND ($6::text IS NULL OR h.category = $6)
-       AND h.active_time_start <= NOW()
+       AND h.active_time_start <= NOW() + INTERVAL '24 hours'
        AND h.active_time_end IS NOT NULL
-       AND h.active_time_end BETWEEN NOW() AND NOW() + INTERVAL '1 hour'
+       AND h.active_time_end >= NOW()
         AND ST_DWithin(h.location, ${geographyPointSql("$2", "$1")}, $3)
      ORDER BY h.demand_score DESC, distance_meters ASC, h.active_time_end ASC
      LIMIT $4`,
@@ -430,7 +430,7 @@ export const hotspotService = {
     const expandedRadius = effectiveRadius > requestedRadius;
     const shortfallReason =
       result.rows.length < HOTSPOT_TARGET_COUNT
-        ? `Only ${result.rows.length} live events ending soon were found within ${formatRadiusKm(effectiveRadius)}.`
+        ? `Only ${result.rows.length} live events found within the next 24 hours within ${formatRadiusKm(effectiveRadius)}.`
         : null;
 
     console.info(
@@ -539,9 +539,9 @@ export const hotspotService = {
        JOIN events e ON e.id = h.event_id
        WHERE h.is_active = TRUE
          AND e.source = ANY($2::text[])
-         AND h.active_time_start <= NOW()
+         AND h.active_time_start <= NOW() + INTERVAL '24 hours'
          AND h.active_time_end IS NOT NULL
-         AND h.active_time_end BETWEEN NOW() AND NOW() + INTERVAL '1 hour'
+         AND h.active_time_end >= NOW()
        ORDER BY h.demand_score DESC, h.active_time_end ASC
        LIMIT $1`,
       [limit, REAL_HOTSPOT_EVENT_SOURCES]

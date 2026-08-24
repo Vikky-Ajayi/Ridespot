@@ -583,7 +583,7 @@ export const eventsService = {
          FROM events e
            WHERE e.is_active = TRUE
              AND e.source = ANY($1::text[])
-           AND e.start_time <= NOW() + INTERVAL '1 hour'
+           AND e.start_time <= NOW() + INTERVAL '24 hours'
        )
        SELECT
          id, name, venue_name, source, source_url, address, city, country, expected_attendance,
@@ -595,8 +595,9 @@ export const eventsService = {
          ST_Y(location::geometry) AS lat,
          ST_X(location::geometry) AS lng
        FROM live_events
-       WHERE (effective_end_time BETWEEN NOW() AND NOW() + INTERVAL '1 hour')
-          OR (start_time BETWEEN NOW() AND NOW() + INTERVAL '1 hour')
+       -- Overlap with the next 24h: hasn't fully ended yet, and starts no later than 24h out.
+       WHERE effective_end_time >= NOW()
+         AND start_time <= NOW() + INTERVAL '24 hours'
        ORDER BY effective_end_time ASC, expected_attendance DESC NULLS LAST`,
       [REAL_EVENT_SOURCES]
     );
@@ -629,7 +630,7 @@ export const eventsService = {
          FROM events e
            WHERE e.is_active = TRUE
              AND e.source = ANY($1::text[])
-           AND e.start_time <= NOW() + INTERVAL '1 hour'
+           AND e.start_time <= NOW() + INTERVAL '24 hours'
            AND ST_DWithin(e.location, ST_SetSRID(ST_MakePoint($3, $2), 4326)::geography, $4)
        )
        SELECT
@@ -642,8 +643,9 @@ export const eventsService = {
          ST_Y(location::geometry) AS lat,
          ST_X(location::geometry) AS lng
        FROM live_events
-       WHERE (effective_end_time BETWEEN NOW() AND NOW() + INTERVAL '1 hour')
-          OR (start_time BETWEEN NOW() AND NOW() + INTERVAL '1 hour')
+       -- Overlap with the next 24h: hasn't fully ended yet, and starts no later than 24h out.
+       WHERE effective_end_time >= NOW()
+         AND start_time <= NOW() + INTERVAL '24 hours'
        ORDER BY effective_end_time ASC, expected_attendance DESC NULLS LAST`,
       [REAL_EVENT_SOURCES, input.lat, input.lng, input.radius]
     );

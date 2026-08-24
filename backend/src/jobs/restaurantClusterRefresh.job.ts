@@ -14,7 +14,7 @@ export const restaurantQueue = new Queue(RESTAURANT_QUEUE_NAME, {
 //  - restaurant *locations* barely change day to day, so the expensive Overpass pull +
 //    reclustering runs weekly.
 //  - the delivery *demand score* (time-of-day weighting, live driver counts, the rolling
-//    active-time window that keeps hotspots inside hotspotService's "ending within 1 hour"
+//    active-time window that keeps hotspots inside hotspotService's "within 24 hours"
 //    query filter) needs to stay fresh, so it runs on the same 5-minute cadence as the
 //    taxi hotspot refresh.
 const RESTAURANT_JOB_SCHEDULES = [

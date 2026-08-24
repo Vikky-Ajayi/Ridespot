@@ -77,7 +77,7 @@ async function queryOverpass(qlQuery: string): Promise<{ elements: Array<Record<
   let lastError: unknown = null;
 
   for (const endpoint of OVERPASS_ENDPOINTS) {
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= 5; attempt++) {
       try {
         const response = await axios.post(endpoint, `data=${encodeURIComponent(qlQuery)}`, {
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -86,8 +86,9 @@ async function queryOverpass(qlQuery: string): Promise<{ elements: Array<Record<
         });
 
         if (response.status === 429 || response.status === 504) {
-          // Fair-use limiter -- back off and retry rather than hammering the endpoint.
-          await sleep(attempt * 5000);
+          // Fair-use limiter on the shared public instance -- back off and retry on the
+          // SAME endpoint rather than burning through to the (less reliable) fallback.
+          await sleep(attempt * 10000);
           continue;
         }
 
@@ -234,8 +235,11 @@ export async function refreshAllRestaurantVenues() {
           venuesPersisted: persisted
         })
       );
-      // Be a good citizen of a free, shared public service between regional queries.
-      await sleep(2000);
+      // Be a good citizen of a free, shared public service between regional queries -- 14
+      // large regional queries back-to-back was tripping the fair-use limiter (confirmed
+      // live: overpass-api.de returns real data on a clean retry, it just needs breathing
+      // room), which then burned through retries onto the unreliable kumi.systems fallback.
+      await sleep(20000);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       results.push({ region: region.key, venues: 0, status: "failed", message });

@@ -1,7 +1,19 @@
 import axios from "axios";
+import { Agent as HttpsAgent } from "node:https";
 import { env } from "../config/env.js";
 import { withTransaction } from "../config/database.js";
 import { canonicalMarketCountry } from "../utils/country.js";
+
+// Forces IPv4 for Overpass requests. An empty-message error on every single region (seen
+// across two consecutive production runs) matches Node's AggregateError shape exactly: when
+// a host resolves to multiple addresses (IPv4 + IPv6) and connections to all of them fail,
+// Node throws an AggregateError whose own top-level .message is empty by default, with the
+// real detail nested in .errors -- classic symptom of a container/cloud host whose IPv6
+// egress is flaky or absent while connection attempts still try it first. Forcing IPv4 is a
+// standard, low-risk fix for exactly this: harmless if IPv6 was never the problem, since
+// overpass-api.de is reachable over IPv4 regardless (confirmed -- this environment's own
+// direct requests to it throughout this session used plain IPv4 resolution).
+const overpassHttpsAgent = new HttpsAgent({ family: 4 });
 
 // Bulk, free restaurant/food-venue source for the delivery-hotspot pipeline.
 // Google Places is deliberately NOT used for the bulk national sweep (per-call billing
@@ -79,6 +91,8 @@ function sleep(ms: number) {
 
 async function queryOverpass(qlQuery: string): Promise<{ elements: Array<Record<string, unknown>> }> {
   let lastError: unknown = null;
+  let lastRetriedStatus: number | null = null;
+  let retriesExhausted = 0;
 
   // Only one endpoint now (see OVERPASS_ENDPOINTS above) -- all the retry budget that used
   // to be split across a real attempt + a doomed fallback attempt goes toward giving the one
@@ -89,7 +103,8 @@ async function queryOverpass(qlQuery: string): Promise<{ elements: Array<Record<
         const response = await axios.post(endpoint, `data=${encodeURIComponent(qlQuery)}`, {
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           timeout: 190000,
-          validateStatus: () => true
+          validateStatus: () => true,
+          httpsAgent: overpassHttpsAgent
         });
 
         if (
@@ -108,6 +123,10 @@ async function queryOverpass(qlQuery: string): Promise<{ elements: Array<Record<
           // and fell straight through to the kumi.systems fallback -- which is itself
           // unreliable (confirmed separately: it returns a bare 500 on every call), so every
           // region ended up failing even though the primary would have worked on retry.
+          // Track this so that if every attempt lands here, throwing still carries the last
+          // status seen instead of an empty/generic message.
+          lastRetriedStatus = response.status;
+          retriesExhausted += 1;
           await sleep(attempt * 10000);
           continue;
         }
@@ -124,13 +143,50 @@ async function queryOverpass(qlQuery: string): Promise<{ elements: Array<Record<
 
         return response.data as { elements: Array<Record<string, unknown>> };
       } catch (error) {
-        lastError = error;
+        // The last two runs reported an empty error message for every single region -- that
+        // matches Node's AggregateError (thrown when a hostname resolves to multiple
+        // addresses, e.g. IPv4+IPv6, and connection attempts to all of them fail): its own
+        // top-level .message is empty by default, with the real detail nested in .errors.
+        // Confirmed this exact shape independently in this same environment against a
+        // different host earlier, so check for it explicitly rather than just guessing again.
+        const axiosCode = (error as { code?: string })?.code;
+        const isAxiosError = (error as { isAxiosError?: boolean })?.isAxiosError;
+        const rawMessage = error instanceof Error ? error.message : undefined;
+        const nestedErrors = (error as { errors?: unknown[] })?.errors;
+        const nestedDetail = Array.isArray(nestedErrors)
+          ? nestedErrors
+              .map((nested) =>
+                nested instanceof Error
+                  ? `${nested.message}${(nested as { code?: string }).code ? ` (${(nested as { code?: string }).code})` : ""}`
+                  : String(nested)
+              )
+              .join("; ")
+          : null;
+        const detail = [
+          rawMessage || null,
+          axiosCode ? `code=${axiosCode}` : null,
+          isAxiosError ? "axios=true" : null,
+          nestedDetail ? `nested=[${nestedDetail}]` : null,
+          `endpoint=${endpoint}`,
+          `attempt=${attempt}`
+        ]
+          .filter(Boolean)
+          .join(" | ");
+        lastError = new Error(detail || `Overpass request threw with no diagnostic info (raw=${String(error)})`);
         await sleep(attempt * 3000);
       }
     }
   }
 
-  throw lastError instanceof Error ? lastError : new Error("Overpass query failed on all endpoints");
+  if (lastError instanceof Error) {
+    throw lastError;
+  }
+
+  throw new Error(
+    retriesExhausted > 0
+      ? `Overpass query exhausted all retries -- last transient status was HTTP ${lastRetriedStatus}`
+      : "Overpass query failed on all endpoints"
+  );
 }
 
 function parseElement(element: Record<string, unknown>, region: OsmRegion): OsmVenue | null {
@@ -261,7 +317,8 @@ export async function refreshAllRestaurantVenues() {
       // room), which then burned through retries onto the unreliable kumi.systems fallback.
       await sleep(20000);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message =
+        (error instanceof Error ? error.message : "") || String(error) || "Unknown error (no message, no string form)";
       results.push({ region: region.key, venues: 0, status: "failed", message });
       console.warn(
         JSON.stringify({ event: "osm_restaurant_region_failed", region: region.key, message })

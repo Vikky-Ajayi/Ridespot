@@ -219,6 +219,52 @@ function parseSitemapJsonLdEvent(raw: Record<string, unknown>, url: string): Eve
   };
 }
 
+// Was a single sequential loop (one URL at a time, 300ms pace) -- at ~2000 URLs/batch that
+// alone takes 15-25+ minutes per batch, badly outrunning the 5-minute cron cadence and
+// silently capping real throughput far below what EVENTBRITE_SITEMAP_MAX_EVENT_PAGES_PER_CYCLE
+// implied. A bounded worker pool gets the aggregate request rate up without hammering any
+// single connection -- each worker still paces itself, there are just several running at once.
+const CRAWL_CONCURRENCY = 15;
+
+async function crawlOneUrl(url: string): Promise<{ matched: number; persisted: number; failed: boolean }> {
+  try {
+    const html = await fetchText(url);
+    const rawEvents = extractJsonLdEvents(html);
+    let regionMatched: string | null = null;
+    let matched = 0;
+    let persisted = 0;
+
+    for (const raw of rawEvents) {
+      const eventInput = parseSitemapJsonLdEvent(raw, url);
+      if (!eventInput) continue;
+
+      regionMatched = eventInput.country;
+      matched += 1;
+      const id = await eventsService.upsertDiscoveredEvent(eventInput);
+      if (id) persisted += 1;
+    }
+
+    await query(
+      `UPDATE eventbrite_sitemap_urls SET last_match_region = $2, last_status = 'ok' WHERE url = $1`,
+      [url, regionMatched]
+    );
+
+    return { matched, persisted, failed: false };
+  } catch (error) {
+    await query(`UPDATE eventbrite_sitemap_urls SET last_status = 'failed' WHERE url = $1`, [url]).catch(
+      () => {}
+    );
+    console.warn(
+      JSON.stringify({
+        event: "eventbrite_sitemap_page_failed",
+        url,
+        message: error instanceof Error ? error.message : String(error)
+      })
+    );
+    return { matched: 0, persisted: 0, failed: true };
+  }
+}
+
 export async function crawlEventbriteSitemapBatch(batchSize?: number) {
   if (!env.EVENTBRITE_SITEMAP_CRAWL_ENABLED) {
     return { claimed: 0, matched: 0, persisted: 0, failed: 0, skipped: "disabled" as const };
@@ -228,44 +274,24 @@ export async function crawlEventbriteSitemapBatch(batchSize?: number) {
   let matched = 0;
   let persisted = 0;
   let failed = 0;
+  let cursor = 0;
 
-  for (const url of urls) {
-    try {
-      const html = await fetchText(url);
-      const rawEvents = extractJsonLdEvents(html);
-      let regionMatched: string | null = null;
-
-      for (const raw of rawEvents) {
-        const eventInput = parseSitemapJsonLdEvent(raw, url);
-        if (!eventInput) continue;
-
-        regionMatched = eventInput.country;
-        matched += 1;
-        const id = await eventsService.upsertDiscoveredEvent(eventInput);
-        if (id) persisted += 1;
-      }
-
-      await query(
-        `UPDATE eventbrite_sitemap_urls SET last_match_region = $2, last_status = 'ok' WHERE url = $1`,
-        [url, regionMatched]
-      );
-    } catch (error) {
-      failed += 1;
-      await query(`UPDATE eventbrite_sitemap_urls SET last_status = 'failed' WHERE url = $1`, [url]).catch(
-        () => {}
-      );
-      console.warn(
-        JSON.stringify({
-          event: "eventbrite_sitemap_page_failed",
-          url,
-          message: error instanceof Error ? error.message : String(error)
-        })
-      );
+  async function worker() {
+    while (cursor < urls.length) {
+      const url = urls[cursor]!;
+      cursor += 1;
+      const result = await crawlOneUrl(url);
+      matched += result.matched;
+      persisted += result.persisted;
+      if (result.failed) failed += 1;
+      // Polite pacing per worker -- this is a bulk crawl of a shared public site, not a
+      // targeted lookup. Concurrency raises aggregate throughput; this keeps each individual
+      // stream of requests unhurried.
+      await sleep(300);
     }
-
-    // Polite pacing -- this is a bulk crawl of a shared public site, not a targeted lookup.
-    await sleep(300);
   }
+
+  await Promise.all(Array.from({ length: Math.min(CRAWL_CONCURRENCY, urls.length) }, () => worker()));
 
   console.info(
     JSON.stringify({

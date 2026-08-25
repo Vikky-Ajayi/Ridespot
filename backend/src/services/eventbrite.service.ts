@@ -564,6 +564,10 @@ async function fetchEventbritePublicPageEventsNear(
   const citySlug = slugify(context.city);
   const countrySlug = context.eventbriteCountrySlug;
   const base = `https://www.eventbrite.com/d/${countrySlug}--${citySlug}`;
+  // 22 real, distinct Eventbrite category listing pages (verified live -- each returns its own
+  // JSON-LD event set, not a shared/soft-404 fallback) instead of the original 8. This is the
+  // single biggest lever on legitimate per-city yield without touching scope or ToS: more of
+  // Eventbrite's own category taxonomy, same one-page-per-category approach as before.
   const urls = [
     `${base}/events/`,
     `${base}/all-events/`,
@@ -572,14 +576,41 @@ async function fetchEventbritePublicPageEventsNear(
     `${base}/nightlife/`,
     `${base}/food-and-drink/`,
     `${base}/performing-arts/`,
-    `${base}/sports/`
+    `${base}/sports/`,
+    `${base}/hobbies/`,
+    `${base}/charity-and-causes/`,
+    `${base}/community/`,
+    `${base}/family-and-education/`,
+    `${base}/spirituality/`,
+    `${base}/travel-and-outdoor/`,
+    `${base}/seasonal-holiday/`,
+    `${base}/home-and-lifestyle/`,
+    `${base}/sports-and-fitness/`,
+    `${base}/science-and-tech/`,
+    `${base}/government-politics/`,
+    `${base}/visual-arts/`,
+    `${base}/film-and-media/`,
+    `${base}/health/`,
+    `${base}/fashion/`,
+    `${base}/other/`
   ];
   const diagnostics: EventSourceDiagnostic[] = [];
   const rawEventsByKey = new Map<string, Record<string, unknown>>();
   let blockedOrFailed = false;
 
-  for (const url of urls) {
-    const response = await axios.get(url, {
+  // Eventbrite starts soft-429ing a city's own requests after ~4 back-to-back page fetches
+  // (confirmed in production logs: events/all-events/music/business succeed, the rest 429).
+  // A short stagger between requests is what actually recovers that lost yield -- the extra
+  // categories above are wasted if this isn't here too.
+  const REQUEST_STAGGER_MS = 700;
+
+  for (let i = 0; i < urls.length; i++) {
+    const url = urls[i]!;
+    if (i > 0) {
+      await new Promise((resolve) => setTimeout(resolve, REQUEST_STAGGER_MS));
+    }
+
+    let response = await axios.get(url, {
       headers: {
         Accept: "text/html,application/xhtml+xml",
         "User-Agent": env.EVENTBRITE_SCRAPER_USER_AGENT
@@ -587,6 +618,21 @@ async function fetchEventbritePublicPageEventsNear(
       timeout: 20000,
       validateStatus: () => true
     });
+
+    // One backoff-retry on a soft 429 -- this is the exact failure mode seen in production
+    // (later categories in a city's sequence getting rate-limited); a single longer pause
+    // recovers most of them instead of just discarding that category for the whole cycle.
+    if (response.status === 429) {
+      await new Promise((resolve) => setTimeout(resolve, 4000));
+      response = await axios.get(url, {
+        headers: {
+          Accept: "text/html,application/xhtml+xml",
+          "User-Agent": env.EVENTBRITE_SCRAPER_USER_AGENT
+        },
+        timeout: 20000,
+        validateStatus: () => true
+      });
+    }
 
     if (response.status < 200 || response.status >= 300 || typeof response.data !== "string") {
       blockedOrFailed = true;

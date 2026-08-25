@@ -37,7 +37,7 @@ const envSchema = z.object({
   EVENT_AGGREGATOR_API_KEY: z.string().default(""),
   PUBLIC_EVENT_REFRESH_TTL_SECONDS: z.coerce.number().int().positive().default(600),
   EVENTBRITE_SITEMAP_CRAWL_ENABLED: booleanFromEnv.default(true),
-  EVENTBRITE_SITEMAP_MAX_EVENT_PAGES_PER_CYCLE: z.coerce.number().int().positive().default(2000),
+  EVENTBRITE_SITEMAP_MAX_EVENT_PAGES_PER_CYCLE: z.coerce.number().int().positive().default(3000),
   OVERPASS_API_URL: z.string().default(""),
   GOOGLE_MAPS_API_KEY: z.string().default(""),
   GOOGLE_VISION_API_KEY: z.string().default(""),

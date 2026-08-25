@@ -124,8 +124,13 @@ export function createRestaurantClusterWorker() {
     {
       connection: getRedisConnectionOptions(),
       // The weekly location-refresh cycle crawls Overpass across 14 regions and can run
-      // long -- give it real headroom instead of the BullMQ default.
-      lockDuration: 30 * 60 * 1000
+      // long -- give it real headroom instead of the BullMQ default. Each region now retries
+      // up to 5x per endpoint (x2 endpoints) with escalating backoff on 429/500/502/503/504,
+      // so the theoretical worst case (every attempt on every region hitting a transient
+      // error) is well over an hour even though a normal run finishes in ~10-15 minutes.
+      // A short lockDuration here would make BullMQ think a legitimately-slow-but-fine run
+      // had stalled and reschedule a duplicate on top of it.
+      lockDuration: 2 * 60 * 60 * 1000
     }
   );
 }

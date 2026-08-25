@@ -85,9 +85,22 @@ async function queryOverpass(qlQuery: string): Promise<{ elements: Array<Record<
           validateStatus: () => true
         });
 
-        if (response.status === 429 || response.status === 504) {
-          // Fair-use limiter on the shared public instance -- back off and retry on the
-          // SAME endpoint rather than burning through to the (less reliable) fallback.
+        if (
+          response.status === 429 ||
+          response.status === 500 ||
+          response.status === 502 ||
+          response.status === 503 ||
+          response.status === 504
+        ) {
+          // All of these are transient signals from a shared public instance under load
+          // (fair-use limiter, upstream overload, proxy hiccups) -- confirmed live that a
+          // plain retry of the exact same query against the exact same endpoint succeeds
+          // (e.g. the London region: 502 on a first attempt, 200 with real data on a clean
+          // retry seconds later). The previous version only retried on 429/504 and treated
+          // 500/502/503 as final, which gave up on the primary endpoint after one attempt
+          // and fell straight through to the kumi.systems fallback -- which is itself
+          // unreliable (confirmed separately: it returns a bare 500 on every call), so every
+          // region ended up failing even though the primary would have worked on retry.
           await sleep(attempt * 10000);
           continue;
         }

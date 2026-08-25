@@ -9,10 +9,14 @@ import { canonicalMarketCountry } from "../utils/country.js";
 // and Google Places is reserved for enriching only the top clusters
 // (see restaurantClustering.service.ts).
 
-const OVERPASS_ENDPOINTS = [
-  env.OVERPASS_API_URL || "https://overpass-api.de/api/interpreter",
-  "https://overpass.kumi.systems/api/interpreter"
-];
+// Only the official instance -- checked three candidate public mirrors as a fallback and
+// none were usable: overpass.kumi.systems is dead (bare 500 on every call), overpass.osm.ch
+// returns clean 200s with an empty "elements" array for real UK/Nigeria bboxes (silently
+// wrong -- worse than an honest failure, since it would report a region as "succeeded" with
+// zero venues instead of flagging it as failed), and the maps.mail.ru mirror doesn't respond
+// at all. A fallback that either lies or never answers isn't worth keeping just to have one;
+// better to put that effort into patience on the endpoint that actually has real data.
+const OVERPASS_ENDPOINTS = [env.OVERPASS_API_URL || "https://overpass-api.de/api/interpreter"];
 
 const RESTAURANT_AMENITIES = ["restaurant", "fast_food", "cafe"] as const;
 
@@ -76,8 +80,11 @@ function sleep(ms: number) {
 async function queryOverpass(qlQuery: string): Promise<{ elements: Array<Record<string, unknown>> }> {
   let lastError: unknown = null;
 
+  // Only one endpoint now (see OVERPASS_ENDPOINTS above) -- all the retry budget that used
+  // to be split across a real attempt + a doomed fallback attempt goes toward giving the one
+  // endpoint that actually has data more real chances instead.
   for (const endpoint of OVERPASS_ENDPOINTS) {
-    for (let attempt = 1; attempt <= 5; attempt++) {
+    for (let attempt = 1; attempt <= 8; attempt++) {
       try {
         const response = await axios.post(endpoint, `data=${encodeURIComponent(qlQuery)}`, {
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
